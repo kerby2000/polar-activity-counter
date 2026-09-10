@@ -1,0 +1,155 @@
+{
+  "saved_at_utc": "2026-09-10T20:30:48.155922+00:00",
+  "evaluation": "blind-01, before ground-truth disclosure",
+  "model_sha256": "9d3327191446cc38c5de56f2027a5edd9c238cafd5ccf131f9009272e4550076",
+  "code_sha256": {
+    "analyser.py": "7154f0e22194180168a0a4290d116769e1af82ca2dd9439ef8a0927c7d88ff2a",
+    "motion_quality.py": "6decafa6b338868d77b0940e9b4030a37c30cbb2300dc58b4484533feb0b078c",
+    "recognition.py": "1877a08e7affcf302515ca98638860a037d432eaa410900547e4e7359b5dfc0e",
+    "counter.py": "aa1520116d808d5362f50a2a1f73aa0597936d4eda3feba4dab1089162464cc7"
+  },
+  "code_matches_pre_blind_validation": true,
+  "source_sha256": {
+    "acc.csv": "bfd0c3753102689f00822e7a95257f779cf9163dcaf40d84241d47480c920a2c",
+    "connection.log": "f55a98df8790704cef347adedd31f39ee9a098c00d00145b621eef2eb268d548",
+    "gyro.csv": "bb580e59f11aea4737a136231d3be1812bd50effd9d405631fa7552b6b12d2f7",
+    "hr.csv": "e4aec480456bd1a10ac572d4ff65483a145fa8a5297632afc619577adf14ca91",
+    "labels.csv": "5b8910fce4a088bc9d147b9fbc1fe7ddfad6a4234200c0cce10ac161262408ef",
+    "metadata.json": "968a6d6f2df15010b0ce5b205d0427f80da6d19b281c11c3032f4e9ff0346e9f",
+    "offline-session.json": "bfe1131a756edfce626ec1b3ed4165459d3019fb0e40f7968031214e8c5fbbd8",
+    "packets.jsonl": "9568b8f361e259d6d17deb6a4467e970694e74ba702f99899482214542875958"
+  },
+  "frozen_prediction_sha256": {
+    "activities.csv": "98cc1e0edfa1e26ada246a1cdce2372fa94afd966bbc9ae7c07a0fd8a8f55563",
+    "analysis.json": "f53a16f1f80c8bc68f822d0588953cfa6be7903370457500433ee0f84b5f000b",
+    "analysis.png": "b567a1340c632781f109be7577153a71e01afbb1e47751683d48433e68fa82b9",
+    "jump_impacts.csv": "e1413d49773749f52c358ff37ac375dc5ac47c7f06c5d952a59215c0164e0ed1",
+    "motion_quality.csv": "213ae6442a331cb810662f72802a9e33163b06c8f0e7d733923675b8383dfcd3",
+    "repetitions.csv": "561aa54b4687c0ca4b71095f35afcfbf26ea23bfe2fc78e6b483a70d7c47b663",
+    "sets.csv": "273a61a876655807bcae0fce5802eac69c07aeedd6cb732395857b6a8f172e17"
+  },
+  "ground_truth": null,
+  "reads_target_labels": false,
+  "quality": {
+    "acc": {
+      "samples": 8460,
+      "packets": 108,
+      "expected_rate_hz": 52,
+      "measured_rate_hz": 52.92577610170014,
+      "packet_endpoint_rate_hz": 52.937621832924286,
+      "duration_s": 159.827604299,
+      "largest_gap_ms": 19.23077,
+      "suspicious_gaps": 0,
+      "duplicate_timestamps": 0,
+      "non_monotonic_timestamps": 0,
+      "estimated_missing_samples": 0,
+      "frame_estimated_missing_samples": 0,
+      "frame_discontinuities": 0,
+      "first_device_timestamp_ns": 842386977606318227,
+      "last_device_timestamp_ns": 842387137433922526,
+      "loss_caveat": "No sequence counter: inferred sample loss, not exact packet loss"
+    },
+    "gyro": {
+      "samples": 8460,
+      "packets": 123,
+      "expected_rate_hz": 52,
+      "measured_rate_hz": 52.92679282960308,
+      "packet_endpoint_rate_hz": 52.93762343906477,
+      "duration_s": 159.824533998,
+      "largest_gap_ms": 19.23077,
+      "suspicious_gaps": 0,
+      "duplicate_timestamps": 0,
+      "non_monotonic_timestamps": 0,
+      "estimated_missing_samples": 0,
+      "frame_estimated_missing_samples": 0,
+      "frame_discontinuities": 0,
+      "first_device_timestamp_ns": 842386977609388528,
+      "last_device_timestamp_ns": 842387137433922526,
+      "loss_caveat": "No sequence counter: inferred sample loss, not exact packet loss"
+    },
+    "overlap_s": 159.824533998
+  },
+  "sets": [],
+  "activities": [
+    {
+      "activity": "other_movement",
+      "block_id": 0,
+      "start_time_s": 1.503070301,
+      "end_time_s": 20.503070300999997
+    },
+    {
+      "activity": "unknown",
+      "block_id": 0,
+      "start_time_s": 20.503070300999997,
+      "end_time_s": 28.503070300999997
+    },
+    {
+      "activity": "other_movement",
+      "block_id": 0,
+      "start_time_s": 28.503070300999997,
+      "end_time_s": 44.503070300999994
+    },
+    {
+      "activity": "stationary",
+      "block_id": 0,
+      "start_time_s": 44.503070300999994,
+      "end_time_s": 54.503070300999994
+    },
+    {
+      "activity": "other_movement",
+      "block_id": 0,
+      "start_time_s": 54.503070300999994,
+      "end_time_s": 55.503070300999994
+    },
+    {
+      "activity": "walking",
+      "block_id": 0,
+      "start_time_s": 55.503070300999994,
+      "end_time_s": 59.503070300999994
+    },
+    {
+      "activity": "unknown",
+      "block_id": 0,
+      "start_time_s": 59.503070300999994,
+      "end_time_s": 77.50307030099998
+    },
+    {
+      "activity": "other_movement",
+      "block_id": 0,
+      "start_time_s": 77.50307030099998,
+      "end_time_s": 86.50307030099998
+    },
+    {
+      "activity": "walking",
+      "block_id": 0,
+      "start_time_s": 86.50307030099998,
+      "end_time_s": 97.50307030099998
+    },
+    {
+      "activity": "other_movement",
+      "block_id": 0,
+      "start_time_s": 97.50307030099998,
+      "end_time_s": 105.50307030099998
+    },
+    {
+      "activity": "walking",
+      "block_id": 0,
+      "start_time_s": 105.50307030099998,
+      "end_time_s": 115.50307030099998
+    },
+    {
+      "activity": "other_movement",
+      "block_id": 0,
+      "start_time_s": 115.50307030099998,
+      "end_time_s": 151.50307030099998
+    },
+    {
+      "activity": "stationary",
+      "block_id": 0,
+      "start_time_s": 151.50307030099998,
+      "end_time_s": 157.50307030099998
+    }
+  ],
+  "warnings": [],
+  "note": "Unchanged frozen model and analyser; no blind-session training, threshold changes or target annotation inspection."
+}

@@ -1,0 +1,13 @@
+{
+  "session_id": "739927de-9335-4d5b-8cc8-6c945d601aa8",
+  "subject": "sergey",
+  "sensor_position": "upper_arm_left",
+  "status": "complete",
+  "quality": {
+    "warnings": [
+      "Stopping gyro: [WinError -2147023673] The operation was canceled by the user.",
+      "ACC/gyro duration mismatch exceeds 0.5s (startup/shutdown may differ)"
+    ]
+  },
+  "review_export_note": "Analysis-only selected metadata; original acquisition metadata not included."
+}

@@ -1,0 +1,10 @@
+{
+  "session_id": "8905b538-491b-45f5-bab1-302f24482d60",
+  "subject": "sergey",
+  "sensor_position": "upper_arm_left",
+  "status": "complete",
+  "quality": {
+    "warnings": []
+  },
+  "review_export_note": "Analysis-only selected metadata; original acquisition metadata not included."
+}

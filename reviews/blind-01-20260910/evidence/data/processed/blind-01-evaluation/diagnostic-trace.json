@@ -1,0 +1,66 @@
+{
+  "purpose": "Diagnostic trace of unchanged frozen functions; not revised blind predictions or ground truth.",
+  "periodic_candidates": [
+    {
+      "start_time_s": 102.203070301,
+      "end_time_s": 105.08307030099999,
+      "complete_cycles": 3,
+      "classification": {
+        "activity": "other_movement",
+        "matched_reference": "standing_or_sitting",
+        "distance": 0.20105602967384809,
+        "margin": 0.1797270707336668
+      }
+    },
+    {
+      "start_time_s": 115.80307030099999,
+      "end_time_s": 122.403070301,
+      "complete_cycles": 7,
+      "classification": {
+        "activity": "other_movement",
+        "matched_reference": "standing_or_sitting",
+        "distance": 0.238704946484899,
+        "margin": 0.14405899926256968
+      }
+    },
+    {
+      "start_time_s": 123.323070301,
+      "end_time_s": 127.123070301,
+      "complete_cycles": 4,
+      "classification": {
+        "activity": "other_movement",
+        "matched_reference": "standing_or_sitting",
+        "distance": 0.24062368944942547,
+        "margin": 0.13178114707231375
+      }
+    }
+  ],
+  "pullup_candidates_before_cycle_requirement": [
+    {
+      "activity": "pull-up",
+      "block_id": 0,
+      "start_time_s": 20.503070300999997,
+      "end_time_s": 28.503070300999997,
+      "detected_excursions": [],
+      "minimum_events_for_set": 2
+    },
+    {
+      "activity": "pull-up",
+      "block_id": 0,
+      "start_time_s": 61.503070300999994,
+      "end_time_s": 73.50307030099998,
+      "detected_excursions": [],
+      "minimum_events_for_set": 2
+    }
+  ],
+  "raw_window_class_counts": {
+    "other_movement": 86,
+    "walking": 25,
+    "pull-up": 19,
+    "stationary": 18,
+    "squat": 5,
+    "household": 1,
+    "push-up": 2
+  },
+  "final_prediction_remains": "No accepted exercise sets; walking intervals only."
+}

@@ -1,0 +1,100 @@
+{
+  "subject": "sergey",
+  "sensor_position": "upper_arm_left",
+  "jump_count_convention": "paired_impacts",
+  "references": [
+    {
+      "session": "../raw/exercise-02",
+      "activity": "push-up",
+      "start_time_s": 48,
+      "end_time_s": 67,
+      "boundary_source": "Complete label plus automatically detected active core; count 12/13 is uncertain and unused"
+    },
+    {
+      "session": "../raw/exercise-03",
+      "activity": "household",
+      "start_time_s": 35,
+      "end_time_s": 53,
+      "boundary_source": "User identified household session; analyst selected motion core because keyboard label was late"
+    },
+    {
+      "session": "../raw/exercise-05",
+      "activity": "jump",
+      "start_time_s": 64,
+      "end_time_s": 80,
+      "boundary_source": "Inside complete jump label 56.953-83.281; analyst excluded preparation/rest"
+    },
+    {
+      "session": "../raw/exercise-05",
+      "activity": "walking",
+      "start_time_s": 136,
+      "end_time_s": 157,
+      "boundary_source": "Inside complete walking label 132.953-160.219; edges excluded"
+    },
+    {
+      "session": "../raw/exercise-06",
+      "activity": "squat",
+      "start_time_s": 22,
+      "end_time_s": 45,
+      "boundary_source": "Inside complete squat label 19.187-49.172; automatic active core"
+    },
+    {
+      "session": "../raw/pullups-01",
+      "activity": "pull-up",
+      "start_time_s": 21,
+      "end_time_s": 29,
+      "boundary_source": "User confirmed two total pullups; analyst selected plausible arm-elevation bout; boundaries not independently labelled"
+    },
+    {
+      "session": "../raw/exercise-06",
+      "activity": "standing_or_sitting",
+      "start_time_s": 65,
+      "end_time_s": 92,
+      "boundary_source": "Standing label; intentionally pooled with sitting"
+    },
+    {
+      "session": "../raw/exercise-06",
+      "activity": "standing_or_sitting",
+      "start_time_s": 108,
+      "end_time_s": 140,
+      "boundary_source": "Sitting label; intentionally pooled with standing"
+    },
+    {
+      "session": "../raw/pullups-02",
+      "activity": "pull-up",
+      "start_time_s": 18,
+      "end_time_s": 35,
+      "boundary_source": "User reports 3 plus a questionable fourth attempt; analyst selected active core; counts and quality unused for fitting"
+    },
+    {
+      "session": "../raw/stairs-01",
+      "activity": "stairs",
+      "start_time_s": 17,
+      "end_time_s": 27,
+      "boundary_source": "First ascent from user-described sequence; analyst selected repeated-step core"
+    },
+    {
+      "session": "../raw/stairs-01",
+      "activity": "stairs",
+      "start_time_s": 30,
+      "end_time_s": 38,
+      "boundary_source": "First descent from user-described sequence; analyst selected repeated-step core"
+    },
+    {
+      "session": "../raw/stairs-01",
+      "activity": "stairs",
+      "start_time_s": 54,
+      "end_time_s": 59.5,
+      "boundary_source": "Second ascent, every second tread; analyst selected core"
+    },
+    {
+      "session": "../raw/stairs-01",
+      "activity": "stairs",
+      "start_time_s": 68,
+      "end_time_s": 73,
+      "boundary_source": "Second descent; user confirmed no handrail; analyst selected core"
+    }
+  ],
+  "jump_convention_source": "Exercise-05: user subsequently confirmed two sets of 10 jumps, the first before pressing Space, and described jumping with arms raised. Each detected bout has 20 impact pulses; the calibrated paired-impact convention yields 10 repetitions per bout. This describes the observed counting unit, not proven jump biomechanics.",
+  "knowledge_base": "knowledge-base.json"
+}

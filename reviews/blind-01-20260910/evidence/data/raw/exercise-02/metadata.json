@@ -1,0 +1,13 @@
+{
+  "session_id": "3e8ceca1-1300-4cf3-99a6-186661e0e35d",
+  "subject": "sergey",
+  "sensor_position": "upper_arm_left",
+  "status": "failed",
+  "quality": {
+    "warnings": [
+      "Stopping hr: Not connected",
+      "Sensor disconnected. Check charge, distance and other apps; partial session saved. Start a new session to continue."
+    ]
+  },
+  "review_export_note": "Analysis-only selected metadata; original acquisition metadata not included."
+}

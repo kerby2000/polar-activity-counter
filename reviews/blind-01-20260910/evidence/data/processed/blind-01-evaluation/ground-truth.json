@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "session": "blind-01",
+  "recorded_at_utc": "2026-09-10T20:41:15.832003+00:00",
+  "source": "User disclosure in this task after frozen predictions were saved",
+  "sequence": [
+    {
+      "order": 1,
+      "activity": "push-up",
+      "repetitions": 5
+    },
+    {
+      "order": 2,
+      "activity": "everyday_activity_break",
+      "description": "Everyday-activity break away from the exercise area"
+    },
+    {
+      "order": 3,
+      "activity": "pull-up",
+      "repetitions": 3
+    },
+    {
+      "order": 4,
+      "activity": "walking",
+      "description": "Walk to first staircase"
+    },
+    {
+      "order": 5,
+      "activity": "stairs",
+      "direction": "up",
+      "treads": null,
+      "handrail_use": null
+    },
+    {
+      "order": 6,
+      "activity": "walking",
+      "description": "Walk to second staircase"
+    },
+    {
+      "order": 7,
+      "activity": "stairs",
+      "direction": "down",
+      "treads": null,
+      "handrail_use": null
+    },
+    {
+      "order": 8,
+      "activity": "walking",
+      "description": "Return to PC and stop recording"
+    }
+  ],
+  "boundary_times": null,
+  "frozen_evaluation": {
+    "expected_repetition_sets": 2,
+    "detected_repetition_sets": 0,
+    "expected_pushup_repetitions": 5,
+    "expected_pullup_repetitions": 3,
+    "expected_stair_traversals": 2,
+    "detected_stairs_intervals": 0,
+    "walking_temporal_accuracy": null
+  },
+  "evaluation_note": "Both exercise sets and both stair traversals missed. No time-based accuracy possible without boundaries. Frozen predictions remain unchanged; session not added to training."
+}
