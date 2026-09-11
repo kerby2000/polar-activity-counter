@@ -279,6 +279,7 @@ def analyse_arrays(data, model):
     return {
         "algorithm": VERSION,
         "counter_revision": "bounded-pullup-continuation-v1",
+        "cycle_selection_revision": "compatible-overlap-v1",
         "sets": accepted,
         "windows": windows,
         "activities": activity_intervals(windows),

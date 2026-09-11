@@ -111,10 +111,17 @@ The original, saved motion-only prediction was 10 push-ups and two pull-ups.
 After the user disclosed three pull-ups, bounded continuation analysis found the
 last effort beyond the classifier boundary: about 4.28 seconds of rest, then an
 excursion about 88% of the first two, ending at the dismount cutoff without a clear
-return. The revised result is **10 push-ups and three pull-up attempts: two observed
+return. That first revision was **10 push-ups and three pull-up attempts: two observed
 returns plus one incomplete return**. MAG also shows this effort, but was not needed
 to recover it from ACC/GYRO. This correction is a development replay after feedback,
 not another successful blind test. The personal classifier/reference model is unchanged.
+
+The participant later questioned a missing first push-up and no longer remembered
+the total. It was already a qualifying ACC/GYRO cycle at 17.28–18.84 seconds in a
+shorter candidate sequence, discarded by the old overlap selection. Matching
+compatible sequences now preserves that first cycle and counts the shared cycles
+only once. The latest result is **11 estimated push-up cycles and three pull-up
+attempts**. Eleven is not an independently confirmed repetition total.
 
 Within the three motion-derived pull-up intervals, the largest change of the MAG
 vector from its first sample was approximately **36.0, 40.0 and 39.9 µT**. This is

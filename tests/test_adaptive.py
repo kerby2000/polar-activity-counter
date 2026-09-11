@@ -15,7 +15,7 @@ from polar_activity.adaptive import (
     fit_model,
     validate_model,
 )
-from polar_activity.adaptive_counter import short_return_bouts
+from polar_activity.adaptive_counter import select_compatible_chains, short_return_bouts
 from polar_activity.adaptive_pullups import pullup_bouts
 from polar_activity.cli import main
 from polar_activity.recognition import motion_blocks
@@ -54,6 +54,61 @@ def test_short_pause_is_not_a_repetition():
     assert len(bouts) == 1
     assert bouts[0]["complete_cycles"] == 14
     assert len(bouts[0]["pauses"]) == 1
+
+
+@pytest.mark.parametrize("side", ["prefix", "suffix"])
+def test_overlapping_seeds_keep_supported_edge_cycle_without_double_counting(side):
+    def chain(starts, score):
+        cycles = [{"start_time_s": float(s), "end_time_s": float(s + 1)} for s in starts]
+        return {
+            "cycles": cycles,
+            "start_time_s": cycles[0]["start_time_s"],
+            "end_time_s": cycles[-1]["end_time_s"],
+            "shape_similarity": score,
+            "seed_start_time_s": cycles[0]["start_time_s"],
+            "seed_window_s": 4,
+        }
+
+    # A longer candidate wins, but a shorter seed saw a valid cycle at its edge.
+    candidates = (
+        [chain(range(1, 11), 0.95), chain(range(8), 0.97)]
+        if side == "prefix"
+        else [chain(range(10), 0.95), chain(range(7, 11), 0.97)]
+    )
+    original = json.dumps(candidates)
+    selected, merges = select_compatible_chains(candidates, 0.08)
+    assert len(selected) == 1 and len(selected[0]["cycles"]) == 11
+    assert selected[0]["start_time_s"] == 0 and selected[0]["end_time_s"] == 11
+    assert len(merges) == 1 and len(merges[0]["added_cycles"]) == 1
+    assert json.dumps(candidates) == original  # saved candidate evidence stays immutable
+
+
+@pytest.mark.parametrize("conflict", ["opposite_phase", "harmonic", "middle", "one_match"])
+def test_overlapping_chain_does_not_invent_counts_from_incompatible_phase(conflict):
+    base = [{"start_time_s": float(s), "end_time_s": float(s + 1)} for s in range(1, 11)]
+    other = [{"start_time_s": float(s), "end_time_s": float(s + 1)} for s in range(8)]
+    if conflict == "opposite_phase":
+        other = [{k: v + 0.5 for k, v in c.items()} for c in other]
+    elif conflict == "harmonic":
+        other = [{"start_time_s": float(s), "end_time_s": float(s + 2)} for s in range(0, 8, 2)]
+    elif conflict == "middle":
+        other[3] = {k: v + 0.2 for k, v in other[3].items()}
+    else:
+        other = other[:2]
+    candidates = [
+        {
+            "cycles": c,
+            "start_time_s": c[0]["start_time_s"],
+            "end_time_s": c[-1]["end_time_s"],
+            "shape_similarity": 0.99,
+            "seed_start_time_s": c[0]["start_time_s"],
+            "seed_window_s": 4,
+        }
+        for c in (base, other)
+    ]
+    selected, merges = select_compatible_chains(candidates, 0.08)
+    assert len(selected) == 1 and selected[0]["cycles"] == base
+    assert merges == []
 
 
 @pytest.mark.parametrize("kind", ["single", "one_direction", "noise", "drift", "partial"])

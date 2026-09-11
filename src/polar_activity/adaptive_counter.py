@@ -118,7 +118,25 @@ def short_return_bouts(t, acc, gyro):
                         ],
                     }
                 )
-    selected = []
+    selected, merges = select_compatible_chains(candidates, tolerance_s=2 / rate)
+    bouts = _group_bouts(t, acc, gyro, sorted(selected, key=lambda b: b["start_time_s"]), config)
+    return bouts, {
+        "seeds": seeds,
+        "candidate_chains": candidates,
+        "compatible_chain_merges": merges,
+        "policy": "At least two physical returns; matching-phase chains share cycles once",
+    }
+
+
+def select_compatible_chains(candidates, tolerance_s):
+    """Keep supported edge cycles when two chains agree on their shared returns.
+
+    Whole-span overlap alone cannot choose between complementary chains. Require
+    at least two matching cycles and agreement throughout the overlap, so opposite
+    phases and harmonics cannot be added to the same count. Preserve the selected
+    chain's boundaries; only append/prepend already-qualified, non-overlapping cycles.
+    """
+    selected, merges = [], []
     for candidate in sorted(
         candidates,
         key=lambda b: (
@@ -127,16 +145,56 @@ def short_return_bouts(t, acc, gyro):
             b["seed_window_s"],
         ),
     ):
-        if any(
-            min(candidate["end_time_s"], s["end_time_s"])
-            > max(candidate["start_time_s"], s["start_time_s"])
+        overlapping = [
+            s
             for s in selected
+            if min(candidate["end_time_s"], s["end_time_s"])
+            > max(candidate["start_time_s"], s["start_time_s"])
+        ]
+        if not overlapping:
+            selected.append({**candidate, "cycles": list(candidate["cycles"])})
+            continue
+        if len(overlapping) != 1:
+            continue
+        previous = overlapping[0]
+        left = max(previous["start_time_s"], candidate["start_time_s"])
+        right = min(previous["end_time_s"], candidate["end_time_s"])
+
+        def inside(cycle, left=left, right=right):
+            return min(cycle["end_time_s"], right) - max(cycle["start_time_s"], left) > tolerance_s
+
+        shared = [[c for c in chain["cycles"] if inside(c)] for chain in (previous, candidate)]
+        if len(shared[0]) < 2 or len(shared[0]) != len(shared[1]):
+            continue
+        if any(
+            abs(a[k] - b[k]) > tolerance_s + 1e-9
+            for a, b in zip(*shared, strict=True)
+            for k in ("start_time_s", "end_time_s")
         ):
             continue
-        selected.append(candidate)
-    bouts = _group_bouts(t, acc, gyro, sorted(selected, key=lambda b: b["start_time_s"]), config)
-    return bouts, {
-        "seeds": seeds,
-        "candidate_chains": candidates,
-        "policy": "At least two physical returns; opposite phase coverage selected once",
-    }
+        prefix = [
+            c for c in candidate["cycles"] if c["end_time_s"] <= previous["start_time_s"] + 1e-9
+        ]
+        suffix = [
+            c for c in candidate["cycles"] if c["start_time_s"] >= previous["end_time_s"] - 1e-9
+        ]
+        if not prefix and not suffix:
+            continue
+        # Extra cycles must meet the selected chain, not jump across an untested rest.
+        if (prefix and abs(prefix[-1]["end_time_s"] - previous["start_time_s"]) > tolerance_s) or (
+            suffix and abs(suffix[0]["start_time_s"] - previous["end_time_s"]) > tolerance_s
+        ):
+            continue
+        merges.append(
+            {
+                "selected_seed_start_time_s": previous["seed_start_time_s"],
+                "contributing_seed_start_time_s": candidate["seed_start_time_s"],
+                "shared_cycles": len(shared[0]),
+                "boundary_tolerance_s": tolerance_s,
+                "added_cycles": prefix + suffix,
+            }
+        )
+        previous["cycles"] = prefix + previous["cycles"] + suffix
+        previous["start_time_s"] = previous["cycles"][0]["start_time_s"]
+        previous["end_time_s"] = previous["cycles"][-1]["end_time_s"]
+    return selected, merges

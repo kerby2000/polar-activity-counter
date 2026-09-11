@@ -12,7 +12,7 @@ show classifier evidence; only the shaded regions above are accepted exercise se
 
 | Activity | Updated interval (session seconds) | Updated estimate | Participant report |
 |---|---|---|---|
-| Push-up | 18.84–34.12 | 10 observed cycles | 10 |
+| Push-up | 17.28–34.12 | 11 estimated motion cycles | Total uncertain; earlier recollection of 10 withdrawn |
 | Pull-up | 58.88–73.80 | 3 attempts: 2 observed returns, 1 incomplete return | 3, with a difficult last effort |
 
 The original prediction was saved before disclosure and counted only two pull-ups.
@@ -21,6 +21,13 @@ beyond the classifier interval. It follows a 4.28-second rest and reaches about
 88% of the earlier arm excursion. The return is not fully observed before the
 dismount cutoff, so this is not presented as three verified complete cycles.
 This is a **development correction after feedback**, not a fresh blind success.
+
+On reviewing the plot, the participant also questioned the first push-up and said
+the total was uncertain. A cycle at **17.28–18.84s** already passed the existing
+ACC/GYRO checks in one candidate sequence. The old selection discarded that
+sequence in favour of a longer one starting one cycle later. Matching the shared
+cycles now retains the extra first cycle without double-counting their overlap.
+The current estimate is **11**, without independent confirmation of the total.
 
 The MAG vector changes by about 36.0, 40.0 and 39.9 µT during the three pull-up
 intervals; HR remains elevated after movement ends. These are descriptive sensor

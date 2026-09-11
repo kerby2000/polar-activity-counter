@@ -20,16 +20,19 @@ as activity estimates. It runs locally and produces PNG, JSON and CSV reports.
 
 ### Magnetic-01: catching the difficult last pull-up
 
-The updated analyser finds **10 push-ups and 3 pull-up attempts**. The first two
+The updated analyser estimates **11 push-up cycles and 3 pull-up attempts**. The first two
 pull-ups have clear returns; the final effort follows a **4.3-second pause** and
 ends at dismount, so its return remains marked incomplete. Its arm excursion is
 about **88%** of the earlier efforts—a movement comparison, not a technique score.
 
-![Magnetic-01: ten push-ups, three pull-up attempts, magnetic-field traces and heart-rate recovery](docs/images/magnetic-01-review.png)
+![Magnetic-01: eleven estimated push-up cycles, three pull-up attempts, magnetic-field traces and heart-rate recovery](docs/images/magnetic-01-review.png)
 
 This is a **development replay after feedback**: the saved original prediction
-was 10 push-ups and 2 pull-ups. Bounded continuation recovered the last effort from
-ACC/GYRO; the personal classifier model was unchanged. Replaying all **11 earlier
+was 10 push-ups and 2 pull-ups. Bounded continuation recovered the last pull-up;
+matching overlapping cycle sequences also restored a valid first push-up that
+selection had discarded. **The participant is uncertain of the push-up total**, so
+11 is an automatic estimate, not a confirmed count. Both fixes use ACC/GYRO, and the
+personal classifier model was unchanged. Replaying all **11 earlier
 recordings** preserved their sets, counts and boundaries, including the blind tests
 and zero counted sets in the household recording.
 
@@ -100,7 +103,7 @@ produced zero counted sets over 65.36 seconds, including when excluded from trai
 that short check does not establish reliable all-day behaviour. See the
 [full adaptive evaluation](docs/adaptive_analysis.md).
 
-The current local suite passes **289 tests**, including HR/MAG decoding and export,
+The current local suite passes **295 tests**, including HR/MAG decoding and export,
 slow final efforts, dismounts, bounded sync recovery and cancellation during startup.
 Ruff and dependency checks pass. The initial sync recovery is tested with simulated
 failures; it does not establish the physical cause of a Bluetooth disconnect.

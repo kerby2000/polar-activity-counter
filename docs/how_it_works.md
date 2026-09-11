@@ -107,6 +107,13 @@ choices can be considered, but their counts are never added together. Supported
 cycles extend a set to its observed boundaries; a qualifying brief quiet pause can
 join two parts without adding a repetition for the pause itself.
 
+Overlapping sequences can supply complementary first/last cycles. They merge only
+when at least two shared cycles agree, every cycle in the overlap has matching
+start/end boundaries within two analysis samples, and the extra cycles meet the
+selected sequence. Shared cycles are counted once. Opposite phases, conflicting
+boundaries and harmonics remain rejected. The report records each contributing
+seed and added cycle; no detection threshold is lowered by this selection step.
+
 Implementation: [adaptive_counter.py](../src/polar_activity/adaptive_counter.py).
 
 ### Pull-ups
