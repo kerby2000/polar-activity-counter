@@ -109,7 +109,9 @@ def test_hr_lifecycle_owns_three_streams_and_recovers_failed_starts(tmp_path, bl
         if failure:
             setattr(sensor, failure, True)
         factory = partial(
-            SenseDevice, client_factory=partial(HrClient, sensor=sensor), timeout=0.03
+            # Hosted Windows may need several scheduler ticks to deliver an ACK.
+            # Keep the deliberately lost ACK distinct from an ordinary fake reply.
+            SenseDevice, client_factory=partial(HrClient, sensor=sensor), timeout=0.5
         )
         run = partial(
             run_offline, selected_device=ble_device, device_factory=factory, ftp_factory=HrTransfer

@@ -200,7 +200,8 @@ def test_four_stream_offline_lifecycle_and_recovery(tmp_path, ble_device, failur
             selected_device=ble_device,
             ftp_factory=HrTransfer,
             device_factory=partial(
-                SenseDevice, client_factory=partial(MagOfflineClient, sensor=sensor), timeout=0.03
+                # Match the HR lifecycle fixture's hosted-Windows scheduling budget.
+                SenseDevice, client_factory=partial(MagOfflineClient, sensor=sensor), timeout=0.5
             ),
         )
         path = tmp_path / "mag"
