@@ -30,9 +30,11 @@ class FakeClient:
     disconnect_during_stream = False
     silent = False
     malformed = False
+    omit_acc_factor = False
 
-    def __init__(self, device, disconnected_callback):
+    def __init__(self, device, disconnected_callback, *, pair=False, timeout=30, winrt=None):
         self.device = device
+        self.options = {"pair": pair, "timeout": timeout, "winrt": winrt}
         self.disconnected_callback = disconnected_callback
         self.is_connected = False
         self.callbacks = {}
@@ -65,6 +67,8 @@ class FakeClient:
             return bytes([78])
         if "2a26" in uuid:
             return b"synthetic-fw"
+        if "2a28" in uuid:
+            return b"synthetic-fw"
         return b"SYNTHETIC Verity Sense"
 
     async def write_gatt_char(self, uuid, data, response):
@@ -82,7 +86,8 @@ class FakeClient:
                 + bytes([4, 1, 3])
             )
         elif operation == 2:
-            payload = bytes([5, 1]) + struct.pack("<f", 0.001 if kind == 2 else 0.125)
+            if not (kind == 2 and self.omit_acc_factor):
+                payload = bytes([5, 1]) + struct.pack("<f", 0.001 if kind == 2 else 0.125)
             if not error:
                 self.active.add(kind)
         elif operation == 3:
@@ -94,6 +99,8 @@ class FakeClient:
                     value = packet(
                         measurement, EPOCH + index * 10**9 + (1000 if measurement == 5 else 0)
                     )
+                    if measurement == 2 and self.omit_acc_factor:
+                        value = value[:9] + b"\x81" + value[10:]
                     self.callbacks[DATA](None, bytearray(value[:-1] if self.malformed else value))
             if self.disconnect_during_stream:
                 self.is_connected = False
@@ -103,7 +110,7 @@ class FakeClient:
 @pytest.fixture
 def fake_factory():
     FakeClient.instances = []
-    for name in ("hr_fails", "disconnect_during_stream", "silent", "malformed"):
+    for name in ("hr_fails", "disconnect_during_stream", "silent", "malformed", "omit_acc_factor"):
         setattr(FakeClient, name, False)
     FakeClient.reject = None
     return partial(SenseDevice, client_factory=FakeClient, timeout=0.05)

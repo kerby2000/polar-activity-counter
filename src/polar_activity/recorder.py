@@ -7,6 +7,7 @@ from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 
+from .connection_log import ConnectionLog
 from .device import Packet, SenseDevice, find_device
 from .keyboard import HELP, Keyboard, LabelController
 from .labels import Labels
@@ -41,12 +42,13 @@ async def record_session(
     notes: str = "",
     device_factory=SenseDevice,
     selected_device=None,
+    connect_timeout: float = 30,
 ) -> tuple[Path, dict]:
     from .diagnostics import diagnose
 
     selected = selected_device or await find_device(selector, scan_timeout)
     buffer = PacketBuffer()
-    device = device_factory(selected, buffer.put)
+    device = device_factory(selected, buffer.put, connect_timeout=connect_timeout)
     store = SessionStore(output, subject, sensor_position, arm, notes)
     labels = Labels(output, store.elapsed)
     recon: dict[str, TimestampReconstructor] = {}
@@ -55,6 +57,12 @@ async def record_session(
     error: Exception | None = None
     parse_errors: list[str] = []
     cancelled = False
+    sample_counts = {"acc": 0, "gyro": 0}
+    packet_counts = {"acc": 0, "gyro": 0}
+    stop_reason = "setup_error"
+    last_loop_ns = None
+    max_loop_interval_ms = 0.0
+    connection_log = ConnectionLog(output / "connection.log")
 
     def process(packet: Packet) -> None:
         packet_id = store.packet(packet)  # Preserve bytes before attempting any interpretation.
@@ -64,6 +72,8 @@ async def record_session(
             )
             stamps, method = recon[packet.stream].reconstruct(last, len(samples))
             store.imu(packet, packet_id, last, stamps, samples, method)
+            sample_counts[packet.stream] += len(samples)
+            packet_counts[packet.stream] += 1
             last_arrival[packet.stream] = packet.host_monotonic_ns
             if method == "non_monotonic_frame":
                 raise AcquisitionError(
@@ -76,6 +86,7 @@ async def record_session(
             raise AcquisitionError("Unexpected PMD stream/packet; raw bytes retained")
 
     try:
+        print("Connecting and checking the sensor; wait for READY before exercising.", flush=True)
         await device.connect()
         report = await device.inspect()
         store.metadata["device"] = report
@@ -98,12 +109,40 @@ async def record_session(
         elif hr:
             store.metadata["warnings"].append("HR characteristic not available")
         store.metadata["scale_factors"] = device.factors.copy()
+        store.metadata["scale_factor_sources"] = device.factor_sources.copy()
         store.metadata["control_exchanges"] = device.exchanges
-        stream_start = time.monotonic_ns()
-        store.metadata["streaming_started_time_s"] = store.elapsed(stream_start)
+        setup_finished = time.monotonic_ns()
+        store.metadata["streaming_started_time_s"] = store.elapsed(setup_finished)
         store.metadata["requested_duration_s"] = duration
         store.save_metadata()
+        print("Checking two valid packets from each of ACC and GYRO...", flush=True)
+        while not all(count >= 2 for count in packet_counts.values()):
+            if buffer.dropped or device.disconnected.is_set():
+                raise AcquisitionError(
+                    "Sensor disconnected or buffer overflow before recording ready"
+                )
+            for _ in range(min(buffer.queue.qsize(), 100)):
+                process(buffer.queue.get_nowait())
+            if all(count >= 2 for count in packet_counts.values()):
+                break
+            if time.monotonic_ns() - setup_finished > 10 * 10**9:
+                missing = ", ".join(s.upper() for s, count in packet_counts.items() if count < 2)
+                raise AcquisitionError(
+                    f"Not enough valid {missing} packets during startup; do not exercise"
+                )
+            await asyncio.sleep(0.01)
+        # Flush real samples before announcing readiness or accepting exercise labels.
+        store.flush()
+        stream_start = time.monotonic_ns()
+        store.metadata["recording_ready_time_s"] = store.elapsed(stream_start)
+        store.save_metadata()
+        print(
+            f"READY: receiving ACC and GYRO at configured 52 Hz "
+            f"({sample_counts['acc']} / {sample_counts['gyro']} samples saved).",
+            flush=True,
+        )
         last_flush = time.monotonic()
+        last_progress = last_flush
         with Keyboard(interactive) as keyboard:
             controller = LabelController(labels)
             print(
@@ -111,11 +150,18 @@ async def record_session(
                 + (HELP if keyboard.enabled else "Keyboard labels disabled.")
             )
             while (time.monotonic_ns() - stream_start) / 1e9 < duration:
+                loop_ns = time.monotonic_ns()
+                if last_loop_ns is not None:
+                    max_loop_interval_ms = max(max_loop_interval_ms, (loop_ns - last_loop_ns) / 1e6)
+                last_loop_ns = loop_ns
+                stop_reason = "acquisition_error"
                 if buffer.dropped:
+                    stop_reason = "buffer_overflow"
                     raise AcquisitionError(
                         "Recorder buffer overflow; session stopped. Check disk/CPU load."
                     )
                 if device.disconnected.is_set():
+                    stop_reason = "disconnected"
                     raise AcquisitionError(
                         "Sensor disconnected. Check charge, distance and other apps; "
                         "partial session saved. Start a new session to continue."
@@ -124,10 +170,12 @@ async def record_session(
                     process(buffer.queue.get_nowait())
                 char = keyboard.read()
                 if char is not None and controller.key(char):
+                    stop_reason = "keyboard_finish"
                     break
                 now = time.monotonic_ns()
                 for stream in configs:
                     if now - last_arrival.get(stream, stream_start) > 10 * 10**9:
+                        stop_reason = "notification_timeout"
                         raise AcquisitionError(
                             f"No {stream.upper()} data for 10s. Check device/connection; "
                             "partial data saved."
@@ -135,10 +183,19 @@ async def record_session(
                 if time.monotonic() - last_flush >= 1:
                     store.flush()
                     last_flush = time.monotonic()
+                if time.monotonic() - last_progress >= 5 and not controller.prompt:
+                    print(
+                        f"Saved ACC {sample_counts['acc']} | GYRO {sample_counts['gyro']} samples",
+                        flush=True,
+                    )
+                    last_progress = time.monotonic()
                 await asyncio.sleep(0.01)
+            else:
+                stop_reason = "duration_reached"
         store.metadata["status"] = "complete"
     except asyncio.CancelledError:
         cancelled = True
+        stop_reason = "cancelled"
         store.metadata["status"] = "interrupted"
     except Exception as exc:
         error = exc
@@ -146,8 +203,27 @@ async def record_session(
         store.metadata["error"] = str(exc)
     finally:
         labels.close()
-        store.metadata["recording_duration_s"] = store.elapsed()
-        stop_errors = await device.close()
+        termination_ns = time.monotonic_ns()
+        store.metadata["recording_duration_s"] = store.elapsed(termination_ns)
+        store.metadata["termination"] = {
+            "reason": stop_reason,
+            "detected_time_s": store.elapsed(termination_ns),
+            "disconnected_before_cleanup": device.disconnected.is_set(),
+            "buffered_packets": buffer.queue.qsize(),
+            "max_recording_loop_interval_ms": max_loop_interval_ms,
+            "last_notification_time_s": {
+                stream: store.elapsed(stamp) for stream, stamp in device.last_notifications.items()
+            },
+            "last_notification_age_s": {
+                stream: (termination_ns - stamp) / 1e9
+                for stream, stamp in device.last_notifications.items()
+            },
+            "max_notification_gap_s": device.max_notification_gap_s.copy(),
+        }
+        try:
+            stop_errors = await device.close()
+        finally:
+            connection_log.close()
         store.metadata["warnings"].extend(stop_errors)
         while not buffer.queue.empty():
             try:
@@ -160,6 +236,8 @@ async def record_session(
             parse_errors=parse_errors,
             control_exchanges=device.exchanges,
             scale_factors=device.factors.copy(),
+            scale_factor_sources=device.factor_sources.copy(),
+            connection_events=device.connection_events,
         )
         if parse_errors or buffer.dropped:
             store.metadata["status"] = "failed"

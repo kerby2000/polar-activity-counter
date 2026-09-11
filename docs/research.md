@@ -1,5 +1,9 @@
 # VS-0 research record
 
+This is the dated acquisition research record. For the current application method,
+see [How it works](how_it_works.md); for physical checks and later recognition
+evidence, see [Validation history](validation.md) and [Examples](examples.md).
+
 Inspected 2026-09-08/09. No device measurements are implied by this document.
 
 ## Source snapshots and releases
@@ -39,7 +43,9 @@ The preferred library was inspected first, but its 1.1.1 high-level API is insuf
 
 We reuse public `MeasurementSettings`, enums and UUIDs from pinned polar-python, with a small directly owned Bleak transport and strict IMU decoder. The decoder is independently implemented from the specification; raw packets and scaling factors permit future re-decoding. Only required ACC/gyro formats are accepted. Unsupported formats fail visibly. No SDK implementation is copied wholesale, no private library attributes are patched, and no global monkeypatch is used. Unit tests cover the risks above.
 
-## Offline recording research (not implemented)
+## Offline recording research
+
+Update 2026-09-10: a narrow Windows/Bleak implementation now provides explicit sensor-memory start/stop and download without requiring an iOS application. See [implementation, workflow and acceptance status](offline_recording.md). The notes below record the original SDK investigation; triggers, encrypted files and a native mobile app are outside the implemented scope.
 
 Read [offline guide](https://github.com/polarofficial/polar-ble-sdk/blob/3d15da61dd0c63e6be2582d03fd80f6c7ba02e11/documentation/SdkOfflineRecordingExplained.md), [offline technical PDF](https://github.com/polarofficial/polar-ble-sdk/blob/3d15da61dd0c63e6be2582d03fd80f6c7ba02e11/technical_documentation/offline_measurement.pdf), current iOS `PolarOfflineRecordingApi.swift`, `PolarOfflineRecordingTrigger` model, and `examples/example-ios/polar-sensor-data-collector/PSDC/PolarBleSdkManager.swift`. Current official iOS API uses async/await since 8.0; Android uses coroutines since 7.0. The guide contains older Android-style feature names; use the current native API enums when implementing iOS later.
 

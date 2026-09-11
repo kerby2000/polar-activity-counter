@@ -46,13 +46,20 @@ def generate(path: Path) -> None:
                     )
                 )
             last = epoch + round(((batch + 1) * 26 - 1) * 1e9 / 52)
-            # Raw ACC type 1 and gyro type 0, as described by the technical specification.
-            payload = (
-                bytes([kind])
-                + last.to_bytes(8, "little")
-                + bytes([1 if kind == 2 else 0])
-                + content
-            )
+            # ACC permits raw type 1; gyro type 0 requires delta compression.
+            frame = 1
+            if kind == 5:
+                samples = list(struct.iter_unpack("<hhh", content))
+                content = bytearray(struct.pack("<hhh", *samples[0]))
+                content.extend(bytes([16, len(samples) - 1]))
+                for previous, current in zip(samples, samples[1:], strict=False):
+                    content.extend(
+                        struct.pack(
+                            "<hhh", *[b - a for a, b in zip(previous, current, strict=True)]
+                        )
+                    )
+                frame = 0x80
+            payload = bytes([kind]) + last.to_bytes(8, "little") + bytes([frame]) + content
             arrival = store.started_ns + last - epoch + 50_000_000
             packet = Packet(stream, payload, arrival, store.metadata["started_utc"])
             ident = store.packet(packet)

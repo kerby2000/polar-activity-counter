@@ -1,0 +1,21 @@
+{
+  "subject": "me",
+  "sensor_position": "upper_arm_left",
+  "jump_count_convention": "unconfirmed",
+  "references": [
+    {
+      "session": "../raw/pushups-reference-01",
+      "activity": "push-up",
+      "start_time_s": 10.0,
+      "end_time_s": 22.0,
+      "boundary_source": "EXAMPLE ONLY: replace times with your observed active interval"
+    },
+    {
+      "session": "../raw/household-reference-01",
+      "activity": "household",
+      "start_time_s": 8.0,
+      "end_time_s": 28.0,
+      "boundary_source": "EXAMPLE ONLY: replace times with your observed household interval"
+    }
+  ]
+}

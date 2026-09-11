@@ -5,13 +5,15 @@ build-backend = "hatchling.build"
 [project]
 name = "polar-activity-counter"
 version = "0.1.0"
-description = "Windows Verity Sense IMU acquisition and labelled dataset collector"
+description = "Verity Sense motion recording, personal activity recognition and repetition counting"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = ["polar-python==1.1.1", "bleak==3.0.2", "numpy==2.4.6", "matplotlib==3.11.1"]
 
 [project.optional-dependencies]
 dev = ["pytest==9.1.1", "ruff==0.16.6"]
+usb = ["hidapi==0.15.0"]
+experiment = ["tslearn==0.9.0", "scipy==1.17.1"]
 
 [project.scripts]
 polar-activity = "polar_activity.cli:main"

@@ -65,16 +65,22 @@ def choose_config(settings: dict[str, list[int]], stream: str) -> StreamConfig:
 
 
 def conversion_factor(settings: dict[str, list[int]]) -> float:
+    # Polar's BlePMDClient.getFactor() uses 1.0 when FACTOR is absent.
+    # A successful start acknowledgement is allowed to contain no settings.
+    if "factor" not in settings:
+        return 1.0
     values = settings.get("factor", [])
     if len(values) != 1:
-        raise AcquisitionError("Device omitted the IMU scale factor; cannot store reliable units")
+        raise AcquisitionError("Invalid IMU scale factor field: expected exactly one value")
     factor = struct.unpack("<f", values[0].to_bytes(4, "little"))[0]
     if not math.isfinite(factor) or factor <= 0:
         raise AcquisitionError(f"Invalid device scale factor: {factor}")
     return factor
 
 
-def decode_delta(payload: bytes, resolution: int = 16, channels: int = 3) -> list[list[int]]:
+def decode_delta(
+    payload: bytes, resolution: int = 16, channels: int = 3, *, wrap_32bit: bool = False
+) -> list[list[int]]:
     """Decode reference + little-endian signed delta blocks, rejecting partial data."""
     width = (resolution + 7) // 8
     offset = width * channels
@@ -106,7 +112,10 @@ def decode_delta(payload: bytes, resolution: int = 16, channels: int = 3) -> lis
                 if delta & (1 << (bits - 1)):
                     delta -= 1 << bits
                 value = samples[-1][channel] + delta
-                if not -(2**31) <= value < 2**31:
+                if wrap_32bit:
+                    # Float frames delta-encode the IEEE-754 bit patterns as Int32.
+                    value = (value + 2**31) % 2**32 - 2**31
+                elif not -(2**31) <= value < 2**31:
                     raise AcquisitionError("IMU delta accumulation exceeds signed 32-bit range")
                 sample.append(value)
             samples.append(sample)
@@ -123,13 +132,21 @@ def decode_imu(data: bytes, config: StreamConfig, factor: float) -> tuple[int, l
         kind not in (2, 5)
         or (kind == 2 and frame not in (0, 1, 2))
         or (kind == 2 and compressed and frame == 2)
-        or (kind == 5 and frame != 0)
+        or (kind == 5 and (not compressed or frame not in (0, 1)))
     ):
         raise AcquisitionError(f"Unsupported IMU format type={kind}, frame={frame}")
     if compressed:
-        samples = decode_delta(data[10:], config.resolution, config.channels)
+        float_frame = kind == 5 and frame == 1
+        samples = decode_delta(data[10:], 32 if float_frame else 16, 3, wrap_32bit=float_frame)
+        if float_frame:
+            samples = [
+                [struct.unpack("<f", v.to_bytes(4, "little", signed=True))[0] for v in sample]
+                for sample in samples
+            ]
+        scale = factor * (1000 if kind == 2 and frame == 0 else 1)
     else:
-        width = frame + 1 if kind == 2 else 2
+        # Raw ACC types 0/1/2 are already signed milliG, per Polar AccData.
+        width = frame + 1
         payload = data[10:]
         if not payload or len(payload) % (3 * width):
             raise AcquisitionError("Truncated raw IMU samples")
@@ -140,8 +157,11 @@ def decode_imu(data: bytes, config: StreamConfig, factor: float) -> tuple[int, l
             ]
             for i in range(0, len(payload), 3 * width)
         ]
-    scale = factor * (1000 if kind == 2 and frame == 0 else 1)
-    return int.from_bytes(data[1:9], "little"), [[v * scale for v in s] for s in samples]
+        scale = 1.0
+    scaled = [[v * scale for v in s] for s in samples]
+    if any(not math.isfinite(value) for sample in scaled for value in sample):
+        raise AcquisitionError("Non-finite IMU sample; raw packet retained")
+    return int.from_bytes(data[1:9], "little"), scaled
 
 
 def decode_hr(data: bytes) -> dict:
@@ -176,6 +196,17 @@ def decode_hr(data: bytes) -> dict:
     return result
 
 
+def frame_interval_matches(delta_ns: int, count: int, rate: float) -> bool:
+    """Allow 2% nominal clock/rate variation or half a sample, whichever is larger.
+
+    Without sequence numbers, small losses cannot be distinguished from rate
+    variation. Larger gaps are preserved instead of interpolated away.
+    """
+    return delta_ns > 0 and abs(delta_ns * rate - count * 10**9) <= max(
+        5 * 10**8, count * 20_000_000
+    )
+
+
 class TimestampReconstructor:
     def __init__(self, rate: int):
         self.rate = rate
@@ -187,7 +218,7 @@ class TimestampReconstructor:
         previous = self.previous
         self.previous = last
         # Compare integer differences, never convert epoch-sized values to floats.
-        if previous is not None and abs((last - previous) * self.rate - count * 10**9) <= 5 * 10**8:
+        if previous is not None and frame_interval_matches(last - previous, count, self.rate):
             stamps = [
                 previous + ((last - previous) * i + count // 2) // count
                 for i in range(1, count + 1)

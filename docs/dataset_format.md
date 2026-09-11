@@ -1,5 +1,10 @@
 # Dataset format, schema version 1
 
+For the current recording/training workflow and output-file guide, see the
+[user manual](user_manual.md). The adaptive engine writes derived results under
+`analysis-adaptive/`; raw CSVs remain compatible across online, offline BLE and USB
+capture. Adaptive models use a separate version from legacy personal models.
+
 Each `record` creates a **new** directory; existing directories are rejected to prevent overwriting recordings. Default: `data/raw/<UTC timestamp>/`. Everything under `data/` is ignored by Git. Keep real datasets local.
 
 ```text
@@ -11,10 +16,11 @@ session/
   hr.csv
   labels.csv
   label_events.jsonl
+  connection.log         # automatic device/Windows backend diagnostics in new sessions
   plots/                 # created by plot command
 ```
 
-Separate streams preserve independently timestamped ACC and gyro without inventing one-to-one synchronization. There is no processed/resampled dataset yet. A later resampler must retain original files, document grid/interpolation policy and avoid interpolating across gaps. `packets.jsonl` is the lossless byte record; CSVs are decoded views that can be regenerated after decoder improvements.
+Separate streams preserve independently timestamped ACC and gyro without inventing one-to-one synchronization. Exploratory analysis uses a derived uniform grid for spectra/counting only, with the method documented in [initial_signal_analysis.md](initial_signal_analysis.md). There is no production synchronized training-table export yet. A later resampler must retain original files, document grid/interpolation policy and avoid interpolating across gaps. `packets.jsonl` is the lossless byte record; CSVs are decoded views that can be regenerated after decoder improvements.
 
 ## IMU CSVs
 
@@ -52,4 +58,43 @@ Contains schema/software version, UUID session ID, host start UTC/monotonic refe
 
 Actual counts/rates/gaps are in `quality.acc`, `quality.gyro` and `quality.hr`. The report also includes ACC/gyro overlap and duration mismatch, label counts, missing counts and interrupted sets. `diagnose` recomputes from current CSVs without altering metadata. `synthetic: true` is reserved for explicitly artificial fixtures. See [protocol.md](protocol.md) for clock reconstruction, error behavior and limits of loss inference.
 
-Only `status: complete` plus a satisfactory quality report and physical sanity checks should pass a collection gate. Do not infer valid IMU acquisition from the existence of files alone.
+New recordings also contain optional `termination` and `connection_events` fields. Termination distinguishes duration reached, keyboard finish, cancellation, link loss, notification timeout, buffer overflow and setup/acquisition errors. It includes whether disconnect preceded cleanup, host-relative last-notification times/ages, maximum host delivery gaps, buffered packet count and the maximum main recording-loop interval. Connection events retain host monotonic and UTC timestamps and identify whether a disconnect occurred during cleanup. Backend detail is saved in UTC-stamped `connection.log`; a specific physical disconnect reason may still be unavailable. These additions are backward compatible; older sessions may lack them.
+
+Only `status: complete` plus a satisfactory quality report and physical sanity checks passes the whole-session completion gate. A failed partial session can still contain usable complete sets, provided sample coverage, timestamps and labels are verified and the failure/provenance remain explicit. Do not infer valid acquisition from file existence alone or relabel a partial session as complete merely because one set survived.
+
+## Sensor-memory sessions
+
+`offline start` creates a new directory with `offline-session.json`; `offline sync`
+adds the original `sensor-files/*.REC` binaries and the CSV/packet/metadata files
+above. The manifest retains the device identity, lifecycle, source paths, reported
+sizes, hashes and protocol exchanges. `capture_mode: sensor_memory` in metadata
+distinguishes these sessions. A `connection.log` appends backend detail across retries.
+
+Verified file contents may be reconstructed from repeated transport payloads using
+the safeguards in [offline recording](offline_recording.md). `transfer-attempts/`
+retains unmodified received bytes and RFC76 packet arrays. Manifest
+`download_attempts` and `downloads[].verification` record the method, hashes,
+reported/received byte counts and any removed transport-block indices. Recovery
+requires two matching reconstructed reads and does not deduplicate IMU samples.
+
+Offline `time_s` starts at the earliest downloaded sample across both streams, with
+integer device timestamps and relative ACC/gyro alignment preserved. Host packet
+arrival fields are empty in CSV and null in JSON: downloading is not acquisition.
+Packet records additionally identify `source: sensor_memory`, `source_path` and
+`source_offset` inside the original binary. Packet IDs are assigned during decoding,
+stream by stream, not by Bluetooth arrival order. Header dates are recorded as reported
+without assuming clock accuracy. Metadata's start UTC refers to the PC start command;
+download UTC and sensor header dates are separate fields.
+
+Offline HR is currently disabled, with an empty standard `hr.csv`. `labels.csv`
+starts empty, with later manual annotations preserved. There is no keyboard-event
+journal for an unattended recording. The same `diagnose`, `plot` and `count` commands
+work on exported data. `status: complete` refers to downloaded file integrity and
+parsed sample quality; it does not independently establish how long the sensor
+remained powered during the intended workout. See [offline recording](offline_recording.md).
+
+## Derived automatic counts
+
+The offline `count` command writes `counts.json`, `sets.csv`, `cycles.csv`, `pauses.csv` and an optional `automatic_count.png` under `SESSION/automatic-count/` or an explicit `--output` directory. These are derived predictions, separate from manually entered ground truth. The counter does not read `labels.csv`, label events or HR. It uses validated device-relative timing, splits at gaps, and keeps original CSVs and metadata unchanged.
+
+`counts.json` stores input ACC/gyro SHA-256 hashes, source session status, algorithm/settings, all evaluated intact overlaps, gaps, detected set boundaries and each accepted complete cycle. With schema version **2**, local ACC/gyro directions, waveform fit and periodic reference windows are stored in each set's `motion_blocks` (previously directly on a v1 set). Every cycle has a `block_id`. Set-level `pauses` retain the interval and evidence for each short rest used to join blocks; `pause_duration_s` is their total, not a measurement of every brief hesitation within individual blocks. Sets retain a flag if near a recording/gap edge. Similarities are not accuracy probabilities. The activity value is `unclassified_repetitive_motion` until a separate activity classifier is validated. See [automatic_counting.md](automatic_counting.md) for details. Raw recording schemas and source labels are unchanged.

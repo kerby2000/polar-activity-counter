@@ -5,6 +5,8 @@ import json
 from collections import Counter
 from pathlib import Path
 
+from .protocol import frame_interval_matches
+
 
 def read_rows(path: Path) -> list[dict[str, str]]:
     if not path.exists():
@@ -28,9 +30,9 @@ def stream_quality(rows: list[dict], rate: float) -> dict:
     frame_discontinuities = 0
     for previous, current in zip(packets, packets[1:], strict=False):
         delta = current[1] - previous[1]
-        if abs(delta - current[2] * period) > period * 0.5:
+        if not frame_interval_matches(delta, current[2], rate):
             frame_discontinuities += 1
-        frame_missing += max(0, round(delta / period) - current[2])
+            frame_missing += max(0, round(delta / period) - current[2])
     frame_span = (packets[-1][1] - packets[0][1]) / 1e9 if len(packets) > 1 else 0
     missing = sum(max(0, round(d / period) - 1) for d in deltas if d > period * 1.5)
     return dict(
