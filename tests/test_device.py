@@ -3,8 +3,13 @@ import asyncio
 import pytest
 from conftest import FakeClient
 
-from polar_activity.device import CP, DATA, SenseDevice, find_device
+from polar_activity.device import CP, DATA, PmdTransportError, SenseDevice, find_device
 from polar_activity.protocol import AcquisitionError, StreamConfig
+
+
+@pytest.fixture(autouse=True)
+def reset_fake_client(fake_factory):
+    """Failure flags must not leak between tests or into another test module."""
 
 
 def test_real_adapter_queries_starts_and_consumes_stops(fake_factory, ble_device):
@@ -48,6 +53,34 @@ def test_timeout_poisoned_connection(fake_factory, ble_device):
         with pytest.raises(AcquisitionError, match="reconnect"):
             await device.command(bytes([1, 2]))
         await device.close()
+
+    asyncio.run(run())
+
+
+def test_disconnect_during_write_fails_promptly_and_cancels_pending_request(ble_device):
+    class DropClient(FakeClient):
+        cancelled = False
+
+        async def write_gatt_char(self, uuid, data, response):
+            await self.disconnect()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                self.cancelled = True
+
+    async def run():
+        device = SenseDevice(ble_device, lambda _: None, client_factory=DropClient, timeout=10)
+        await device.connect()
+        with pytest.raises(PmdTransportError, match="disconnected"):
+            await asyncio.wait_for(device.command_raw(b"\x05"), 0.5)
+        assert device.poisoned and device.client.cancelled
+        assert device.exchanges[-1]["outcome"] == "error"
+        assert device.exchanges[-1]["elapsed_s"] < 0.5
+        assert device.exchanges[-1]["started_utc"]
+        with pytest.raises(AcquisitionError, match="reconnect"):
+            await device.command_raw(b"\x05")
+        cleanup = await device.close()
+        assert "Keep the sensor on" in cleanup[0]
 
     asyncio.run(run())
 

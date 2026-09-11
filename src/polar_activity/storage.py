@@ -23,7 +23,7 @@ def write_json(path: Path, value: object) -> None:
 
 
 class SessionStore:
-    def __init__(self, path: Path, subject: str, position: str, arm: str, notes: str):
+    def __init__(self, path: Path, subject: str, position: str, arm: str, notes: str, mag=False):
         path.mkdir(parents=True, exist_ok=False)
         self.path = path
         self.started_ns = time.monotonic_ns()
@@ -66,6 +66,13 @@ class SessionStore:
         ]
         for stream, unit in [("acc", "mg"), ("gyro", "dps")]:
             self._csv(stream, common + [f"{stream}_{axis}_{unit}" for axis in "xyz"])
+        if mag:
+            self._csv(
+                "mag",
+                common
+                + [f"mag_{axis}_ut" for axis in "xyz"]
+                + ["calibration_status_raw", "calibration_status"],
+            )
         self._csv(
             "hr",
             [
@@ -154,6 +161,30 @@ class SessionStore:
                 **{**values, "rr_intervals_ms": json.dumps(values["rr_intervals_ms"])},
             )
         )
+
+    def magnetometer(self, packet, packet_id, last, stamps, samples, statuses, method):
+        from .magnetometer import calibration_fields
+
+        if self.anchor is None:
+            raise ValueError("Magnetometer needs the original IMU clock anchor")
+        anchor_device, anchor_host = self.anchor
+        for index, (stamp, sample, status) in enumerate(
+            zip(stamps, samples, statuses, strict=True)
+        ):
+            self.writers["mag"].writerow(
+                {
+                    "time_s": (stamp - anchor_device + anchor_host - self.started_ns) / 1e9,
+                    "device_timestamp_ns": stamp,
+                    "packet_timestamp_ns": last,
+                    "packet_id": packet_id,
+                    "sample_index": index,
+                    "host_monotonic_ns": packet.host_monotonic_ns,
+                    "host_time_utc": packet.host_time_utc,
+                    "timestamp_method": method,
+                    **{f"mag_{axis}_ut": value for axis, value in zip("xyz", sample, strict=True)},
+                    **calibration_fields(status),
+                }
+            )
 
     def save_metadata(self) -> None:
         write_json(self.path / "metadata.json", self.metadata)

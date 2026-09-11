@@ -132,7 +132,7 @@ inputs; pressing Space is not required to detect their boundaries.
 
 ## Offline recording: leave Bluetooth range
 
-The app requests ACC and GYRO recording into sensor memory. A normal button-started
+The app requests ACC, GYRO and HR recording into sensor memory. A normal button-started
 Polar training recording does not automatically provide these raw motion streams.
 See Polar's [SDK offline-recording interface](https://github.com/polarofficial/polar-ble-sdk/blob/3d15da61dd0c63e6be2582d03fd80f6c7ba02e11/documentation/SdkOfflineRecordingExplained.md).
 
@@ -142,9 +142,19 @@ Start near the PC:
 .\.venv\Scripts\python.exe -m polar_activity offline start --device YOUR_ID --subject me --sensor-position upper_arm_left --output data/raw/offline-01
 ```
 
-Wait for **Internal ACC + GYRO recording confirmed at 52 Hz**, then for the command
+Wait for both **Internal ACC + GYRO recording confirmed at 52 Hz** and
+**Internal HR recording confirmed**, then for the command
 to exit. Walk away and exercise. Keep the sensor on. There is no duration limit
 configured by this command; explicitly stop or sync when finished.
+
+Use `--no-hr` to omit HR. New `analyze` plots include an HR panel (or explicitly
+say it was not recorded). Offline HR timing is approximate; it currently provides
+context for review and does not influence activity/count predictions. See
+[HR, stair direction and available sensors](heart_rate_and_elevation.md).
+
+Add `--mag` to this start command (or to online `record`) for 20 Hz magnetic-field
+capture. Wait for the MAG confirmation too. Sync automatically downloads that
+stream, and analysis adds a magnetic-field panel. See [magnetometer details](magnetometer.md).
 
 When back in range, use the **same session folder**:
 
@@ -154,7 +164,7 @@ When back in range, use the **same session folder**:
 ```
 
 Sync reconnects, stops this session's streams, downloads the files, checks their
-sizes/format and exports ACC/GYRO CSVs. Keep `offline-session.json`: it identifies
+sizes/format and exports ACC/GYRO/HR CSVs. Keep `offline-session.json`: it identifies
 the sensor and recording. Do not start another session with another app before
 resolving this one. Retry a failed sync using the same command and folder.
 
@@ -281,7 +291,7 @@ retained. See [Data format](dataset_format.md).
 | Symptom | What to check |
 |---|---|
 | `No Verity Sense found` | Sensor on, out of charger, close to PC, competing app disconnected; try a 30-second scan. Check the dongle can discover another Bluetooth device and update its manufacturer driver if needed. |
-| Pairing popup, cancelled operation, notification timeout | Close competing apps, power-cycle the sensor and retry. Collect `--verbose` output and `connection.log`; the app reports the failed setup stage. |
+| Pairing popup, cancelled operation, notification timeout | Close competing apps and retry. Keep the sensor on when recovering an offline recording. Collect `--verbose` output and `connection.log`; the app reports the failed setup stage. |
 | No samples or missing scale factor | Wait for `READY` before exercise. Inspect capabilities and quality reports; reliable IMU units are required. |
 | Disconnect after some samples | The partial session is saved. Diagnose/analyse intact data. Online capture cannot recover samples that never reached the PC; use memory mode when leaving range. |
 | Offline size mismatch/interrupted transfer | Keep the folder and sensor on; repeat `offline sync`. Do not trim bytes or delete the manifest. |

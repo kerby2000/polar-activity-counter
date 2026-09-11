@@ -8,6 +8,8 @@ import numpy as np
 
 from .counter import detect_sets
 from .counting import _write_csv, load_motion
+from .heart_rate import plot_heart_rate, read_heart_rate
+from .magnetometer import plot_magnetometer, read_magnetometer
 from .motion_quality import arm_excursions, compare_excursions
 from .recognition import (
     activity_intervals,
@@ -279,6 +281,8 @@ def analyse_session(
         "output_directory": str(output),
     }
     output.mkdir(parents=True, exist_ok=True)
+    hr_rows, result["heart_rate"] = read_heart_rate(session)
+    mag_rows, result["magnetometer"] = read_magnetometer(session)
     write_json(output / "analysis.json", result)
     _write_csv(
         output / "activities.csv", ["activity", "start_time_s", "end_time_s", "block_id"], intervals
@@ -335,7 +339,7 @@ def analyse_session(
         ],
     )
     if plot:
-        plot_analysis(data, result, output / "analysis.png")
+        plot_analysis(data, result, output / "analysis.png", hr_rows=hr_rows, mag_rows=mag_rows)
         if any(s.get("motion_quality") for s in sets):
             plot_motion_quality(sets, output / "motion_quality.png")
     return result
@@ -386,14 +390,20 @@ def plot_motion_quality(sets: list[dict], output: Path) -> None:
     plt.close(fig)
 
 
-def plot_analysis(data: tuple, result: dict, output: Path) -> None:
+def plot_analysis(data: tuple, result: dict, output: Path, *, hr_rows=None, mag_rows=None) -> None:
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     at, acc, gt, gyro = data
-    fig, axes = plt.subplots(3, 1, figsize=(15, 9), sharex=True, height_ratios=[2, 2, 1])
+    ratios = [2, 2] + ([1.4] if mag_rows else []) + [1.3, 1]
+    fig, axes = plt.subplots(
+        len(ratios), 1, figsize=(15, 13 if mag_rows else 11), sharex=True, height_ratios=ratios
+    )
+    if mag_rows:
+        plot_magnetometer(axes[2], mag_rows)
+    plot_heart_rate(axes[-2], hr_rows or [])
     axes[0].plot(at, np.linalg.norm(acc, axis=1), lw=0.6, color="#235789")
     axes[1].plot(gt, np.linalg.norm(gyro, axis=1), lw=0.6, color="#2a9d8f")
     axes[0].set_ylabel("Acceleration magnitude (mg)")
@@ -412,7 +422,7 @@ def plot_analysis(data: tuple, result: dict, output: Path) -> None:
         "unknown": "#ddd",
     }
     for interval in result["activities"]:
-        axes[2].axvspan(
+        axes[-1].axvspan(
             interval["start_time_s"], interval["end_time_s"], color=palette[interval["activity"]]
         )
     for bout in result["sets"]:
@@ -437,16 +447,16 @@ def plot_analysis(data: tuple, result: dict, output: Path) -> None:
             axes[1].axvline(cycle["start_time_s"], color="#666", lw=0.5, alpha=0.7)
     names = sorted({i["activity"] for i in result["activities"]})
     handles = [plt.Rectangle((0, 0), 1, 1, color=palette[n]) for n in names]
-    axes[2].legend(
+    axes[-1].legend(
         handles,
         [n.replace("_", " ") for n in names],
         loc="upper center",
         bbox_to_anchor=(0.5, -0.4),
         ncol=4,
     )
-    axes[2].set_yticks([])
-    axes[2].set_ylabel("Activity estimate")
-    axes[2].set_xlabel("Original session time (s)")
+    axes[-1].set_yticks([])
+    axes[-1].set_ylabel("Activity estimate")
+    axes[-1].set_xlabel("Original session time (s)")
     for axis in axes[:2]:
         axis.grid(alpha=0.2)
     fig.suptitle(
@@ -464,6 +474,24 @@ def plot_analysis(data: tuple, result: dict, output: Path) -> None:
 
 def format_analysis(result: dict) -> str:
     lines = ["Personal activity analysis"]
+    mag = result.get("magnetometer")
+    if mag and mag["valid_samples"]:
+        lines.append(
+            f"MAG: {mag['valid_samples']} samples; field magnitude "
+            f"{mag['field_magnitude_min_ut']:.1f}-{mag['field_magnitude_max_ut']:.1f} µT "
+            "(inspection only)"
+        )
+    hr = result.get("heart_rate")
+    if hr is not None:
+        if hr["valid_samples"]:
+            lines.append(
+                f"HR: {hr['valid_samples']} valid readings; mean {hr['mean_bpm']:.0f} bpm; "
+                f"range {hr['min_bpm']:g}-{hr['max_bpm']:g} bpm (context only)"
+            )
+            if (hr.get("timing") or "").startswith("Approximate"):
+                lines.append("  Offline HR timing is approximate at nominal 1 Hz.")
+        else:
+            lines.append("HR: no valid readings" if hr["samples"] else "HR: not recorded")
     for bout in result["sets"]:
         estimate = bout["rep_estimate"]
         detail = (

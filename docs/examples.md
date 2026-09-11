@@ -1,9 +1,50 @@
-# Blind recordings: results and figure provenance
+# Recording examples: results and figure provenance
 
-These figures use real ACC/GYRO recordings from one participant wearing a Verity
-Sense on the left upper arm. They are presentation exports of saved decisions,
+These figures use real recordings from one participant wearing a Verity Sense on
+the left upper arm. Blind-01/02 show ACC/GYRO; magnetic-01 also shows MAG and HR.
+They are presentation exports of saved decisions,
 not a new inference run or a relabelling of the signals. The lower colour bands
 show classifier evidence; only the shaded regions above are accepted exercise sets.
+
+## Magnetic-01: motion, magnetism and heart rate
+
+![Magnetic-01 motion, magnetic field and heart rate, with the final pull-up effort retained](images/magnetic-01-review.png)
+
+| Activity | Updated interval (session seconds) | Updated estimate | Participant report |
+|---|---|---|---|
+| Push-up | 17.28–34.12 | 11 estimated motion cycles | Total uncertain; earlier recollection of 10 withdrawn |
+| Pull-up | 58.88–73.80 | 3 attempts: 2 observed returns, 1 incomplete return | 3, with a difficult last effort |
+
+The original prediction was saved before disclosure and counted only two pull-ups.
+After the participant's feedback, bounded continuation captured the third effort
+beyond the classifier interval. It follows a 4.28-second rest and reaches about
+88% of the earlier arm excursion. The return is not fully observed before the
+dismount cutoff, so this is not presented as three verified complete cycles.
+This is a **development correction after feedback**, not a fresh blind success.
+
+On reviewing the plot, the participant also questioned the first push-up and said
+the total was uncertain. A cycle at **17.28–18.84s** already passed the existing
+ACC/GYRO checks in one candidate sequence. The old selection discarded that
+sequence in favour of a longer one starting one cycle later. Matching the shared
+cycles now retains the extra first cycle without double-counting their overlap.
+The current estimate is **11**, without independent confirmation of the total.
+
+The MAG vector changes by about 36.0, 40.0 and 39.9 µT during the three pull-up
+intervals; HR remains elevated after movement ends. These are descriptive sensor
+comparisons, not classifier inputs or independent biomechanical ground truth.
+See [MAG validation and limitations](magnetometer.md) and [HR timing](heart_rate_and_elevation.md).
+
+The full figure, **including HR**, is published with the participant's permission.
+Its [provenance manifest](images/magnetic-01-provenance.json) records the image,
+original prediction, updated analysis and input hashes, plus the model identity
+and displayed count summaries. Raw CSVs, credentials and the personal model remain
+local. The image is copied unchanged from the reviewed local export; its publication
+does not rerun inference or modify any frozen prediction. It is separate from the
+blind-only renderer described below.
+
+All 11 earlier recordings retain their prior sets, counts, boundaries and unassigned
+attempts after the counter change. Known extra development estimates are unchanged;
+this regression check does not establish all-day false-positive performance.
 
 ## Blind-02: prediction before disclosure
 
@@ -51,10 +92,10 @@ figure does not establish automatic stair direction or stair-step counting.
 
 ## What is preserved
 
-Both blind recordings remain outside the personal model's training references.
+Both blind recordings and magnetic-01 remain outside the personal model's training references.
 The original participant's raw recordings, model and detailed frozen evaluation
 folders remain local under ignored `data/`. This repository publishes the three
-figures and a compact [provenance manifest](images/provenance.json), including input,
+blind figures and a compact [provenance manifest](images/provenance.json), including input,
 model, prediction and image SHA-256 hashes and the accepted set summaries.
 
 Frozen blind-02 analysis SHA-256:
@@ -73,10 +114,10 @@ The local evidence comprises `pre-registration.json`, `prediction-lock.json`,
 the saved predictions, `user-confirmation.json`, `evaluation.json` and a frozen
 source snapshot under `data/processed/blind-02-evaluation/`. Public hashes identify
 those artifacts; hashes alone are not an independent reproduction of the results.
-The public figures contain motion only, with no heart-rate trace, Bluetooth address
-or sensor credential.
+The blind figures contain motion only, with no heart-rate trace, Bluetooth address
+or sensor credential. The separately approved magnetic-01 figure includes HR.
 
-## Regenerate the pictures
+## Regenerate the blind pictures
 
 With the original local data layout available, run:
 

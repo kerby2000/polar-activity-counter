@@ -235,14 +235,14 @@ class FileTransfer:
                     raise AcquisitionError("Unsafe sensor directory entry")
                 if re.fullmatch(r"(?:\d{8}|R|\d{6})/", name):
                     pending.append(path + name)
-                elif re.fullmatch(r"(?:ACC|GYRO)\d*\.REC", name):
+                elif re.fullmatch(r"(?:ACC|GYRO|HR|MAG)\d*\.REC", name):
                     if not re.fullmatch(r"/U/0/\d{8}/R/\d{6}/", path):
                         raise AcquisitionError("Unexpected offline recording directory")
                     files.append(
                         {
                             "path": path + name,
                             "size": size,
-                            "stream": "acc" if name.startswith("ACC") else "gyro",
+                            "stream": re.sub(r"\d*\.REC$", "", name).lower(),
                         }
                     )
         return sorted(files, key=lambda f: f["path"])

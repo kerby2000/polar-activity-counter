@@ -1,0 +1,70 @@
+{
+  "session": "magnetic-01",
+  "evaluation": "retrospective_development_correction_after_user_feedback",
+  "counter_revision": "bounded-pullup-continuation-v1",
+  "model_sha256": "451fc3805b16c642803583428cd2c06580d95b6df71d612a78105a64b409831b",
+  "original_prediction_sha256": "6409b8698c16007b2d059c6bb6cce71706fcadc60ee8a1ad60ad083d67c98e63",
+  "updated_analysis_sha256": "19378e176aaf2ffd554b43d90201bc090060c3952dd5d4180386de7405a07d16",
+  "source_sha256": {
+    "acc.csv": "c84e997cb15d7cde8b34de5637d66d45c5d2bd49804ce2e9a8a1f6b141be443e",
+    "gyro.csv": "35f52db53c0b29b95513f8250c6e868517caad370b2f9fc2a1ea17f47663076c",
+    "mag.csv": "c72220ea605ae95721f1904127b4b0b09cff73c87e01a16526c4b4a13aa4f640",
+    "hr.csv": "731731827de3318f64e543a62d1270e71ccdf8a0e5bcb6e2aad2d5c1210ea70d"
+  },
+  "figure": {
+    "file": "magnetic-01-review.png",
+    "sha256": "23669701a080b3bd10b2c1efd37be8713eee79750d2ff92ccf32187774f947c6",
+    "pixels": [
+      2170,
+      1705
+    ],
+    "export": "unchanged copy of reviewed local Matplotlib figure",
+    "contains_heart_rate": true,
+    "participant_approved_publication_including_hr": true
+  },
+  "original_prediction": {
+    "push-up": 10,
+    "pull-up": 2
+  },
+  "participant_confirmed_counts": {
+    "push-up": null,
+    "pull-up": 3
+  },
+  "sets": [
+    {
+      "activity": "push-up",
+      "rep_estimate": 11,
+      "complete_cycles": 11,
+      "incomplete_returns": 0,
+      "start_time_s": 17.281366611000003,
+      "end_time_s": 34.121366611
+    },
+    {
+      "activity": "pull-up",
+      "rep_estimate": 3,
+      "complete_cycles": 2,
+      "incomplete_returns": 1,
+      "start_time_s": 58.881366611000004,
+      "end_time_s": 73.80136661099999
+    }
+  ],
+  "recognition_inputs": [
+    "ACC",
+    "GYRO"
+  ],
+  "limitations": [
+    "Revised after feedback, not a new blind accuracy result.",
+    "Final pull-up return is not fully observed.",
+    "MAG is not calibrated heading; offline HR timing is approximate.",
+    "Raw recordings, credentials and personal model are not included.",
+    "Eleven push-up cycles is an automatic estimate; the participant no longer remembers the true total."
+  ],
+  "regression_check": {
+    "earlier_recordings": 11,
+    "same_sets_counts_boundaries_and_unassigned_attempts": true
+  },
+  "superseded_analysis_sha256": "03bf15046fb41aa0fefaa5ac6aa7e54cb51c23577dae16c10a1095f26ebe112a",
+  "superseded_figure_sha256": "013372e5ec27ae5a4ca57ba56a3e46a1af08c73e992aa486a23ec3d57fc13263",
+  "cycle_selection_revision": "compatible-overlap-v1",
+  "participant_feedback_revision": "Push-up total uncertain; earlier recollection of 10 withdrawn; first cycle questioned while reviewing plot."
+}

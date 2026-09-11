@@ -228,6 +228,11 @@ def test_transfer_aborts_loss_or_timeout_and_requires_reconnect(replies):
     asyncio.run(check())
 
 
+@pytest.fixture(autouse=True)
+def reset_fake_client(fake_factory):
+    """Each offline lifecycle starts with a clean fake radio."""
+
+
 class Sensor:
     def __init__(self):
         self.active = set()
@@ -304,6 +309,7 @@ def options(action, path):
         device=None,
         scan_timeout=1,
         connect_timeout=1,
+        no_hr=True,
     )
 
 
@@ -345,12 +351,84 @@ def test_offline_round_trip_disconnects_retries_and_never_deletes(tmp_path, ble_
     asyncio.run(check())
 
 
+@pytest.mark.parametrize(
+    "failure", ["disconnect", "timeout", "twice", "malformed", "rejected", "after_stop"]
+)
+def test_sync_retries_only_initial_status_transport_failure(
+    tmp_path, ble_device, fake_factory, failure
+):
+    class StatusClient(OfflineClient):
+        failures = 0
+        connections = 0
+
+        async def connect(self):
+            type(self).connections += 1
+            await super().connect()
+
+        async def write_gatt_char(self, uuid, data, response):
+            can_fail = failure != "after_stop" or any(r[0] == 3 for r in self.sensor.requests)
+            if data == b"\x05" and self.failures and can_fail:
+                type(self).failures -= 1
+                self.sensor.requests.append(bytes(data))
+                if failure == "timeout":
+                    return
+                if failure == "malformed":
+                    self.callbacks[CP](None, bytearray.fromhex("f0 05 ff 00 00 82 82"))
+                elif failure == "rejected":
+                    self.callbacks[CP](None, bytearray.fromhex("f0 05 ff 05"))
+                else:
+                    await self.disconnect()
+                return
+            await super().write_gatt_char(uuid, data, response)
+
+    async def check():
+        sensor = Sensor()
+        path = tmp_path / "status-retry"
+        run = partial(
+            run_offline,
+            selected_device=ble_device,
+            device_factory=partial(
+                SenseDevice, client_factory=partial(StatusClient, sensor=sensor), timeout=0.1
+            ),
+            ftp_factory=MemoryTransfer,
+        )
+        await run(options("start", path))
+        StatusClient.failures = 2 if failure == "twice" else 1
+        before = StatusClient.connections
+        if failure in ("disconnect", "timeout"):
+            await run(options("sync", path))
+        else:
+            with pytest.raises(AcquisitionError):
+                await run(options("sync", path))
+        manifest = json.loads((path / MANIFEST).read_text())
+        retried = failure in ("disconnect", "timeout", "twice")
+        assert StatusClient.connections - before == (2 if retried else 1)
+        assert len(manifest.get("recoveries", [])) == int(retried)
+        assert len([r for r in sensor.requests if r[0] == 2]) == 2  # never restart
+        assert len([r for r in sensor.requests if r[0] == 3]) == (
+            2 if failure in ("disconnect", "timeout", "after_stop") else 0
+        )
+        if failure in ("disconnect", "timeout"):
+            assert manifest["state"] == "downloaded"
+            assert manifest["output_sha256"]
+        else:
+            assert manifest["errors"]
+            assert not manifest.get("downloads")
+        if failure in ("twice", "malformed", "rejected"):
+            assert sensor.active == {2, 5}
+
+    asyncio.run(check())
+
+
 def test_start_with_lost_ack_can_be_stopped_after_reconnect(tmp_path, ble_device):
     async def check():
         sensor = Sensor()
         sensor.lose_start_ack = True
         factory = partial(
-            SenseDevice, client_factory=partial(OfflineClient, sensor=sensor), timeout=0.01
+            # Allow Windows event-loop scheduling before the deliberately lost ACK.
+            SenseDevice,
+            client_factory=partial(OfflineClient, sensor=sensor),
+            timeout=0.1,
         )
         run = partial(
             run_offline,
@@ -415,9 +493,14 @@ def test_sensor_directory_listing_reads_nested_protobuf_and_filters_files():
     async def check():
         ftp = Directories(SimpleNamespace(client=None, lock=asyncio.Lock()))
         files = await ftp.list_recordings()
-        assert [f["path"].rsplit("/", 1)[-1] for f in files] == ["ACC0.REC", "ACC1.REC", "GYRO.REC"]
-        assert [f["size"] for f in files] == [300, 200, 500]
-        assert select_new_files({"baseline_files": []}, files) == files
+        assert [f["path"].rsplit("/", 1)[-1] for f in files] == [
+            "ACC0.REC",
+            "ACC1.REC",
+            "GYRO.REC",
+            "HR.REC",
+        ]
+        assert [f["size"] for f in files] == [300, 200, 500, 30]
+        assert select_new_files({"baseline_files": []}, files) == files[:3]
 
     asyncio.run(check())
 

@@ -198,6 +198,39 @@ or accuracy for other participants.
 
 ## What remains
 
+### Bounded final pull-up continuation (2026-09-11)
+
+An established pull-up set with at least two observed returns can now inspect up
+to eight extra seconds beyond its classifier interval, using the same baseline
+pose. A continuation needs a rest within twice the typical full cycle duration
+(bounded to 3–5 seconds), at least 80% of the set's typical arm excursion and a peak
+direction within 25 degrees of the earlier peaks. The first impact cutoff remains
+in force; unmatched motion or a longer pause stops continuation. These are initial
+development heuristics, not biomechanical definitions of a correct pull-up.
+
+An effort truncated by dismount is retained as an attempt with an incomplete
+return, never silently promoted to a completed cycle. The saved continuation trace
+records the search limit, checks and accepted/rejected evidence. This fixes the
+third effort in `magnetic-01` after user feedback while leaving the earlier 11
+recording replays unchanged. The raw data, original predictions and classifier
+model were preserved. See [MAG findings](magnetometer.md) for the sensor evidence.
+
+### Preserve compatible cycle-sequence edges (2026-09-11)
+
+Reviewing magnetic-01 exposed an already-accepted first push-up cycle at
+17.28–18.84s that selection discarded: the longest candidate covered the later
+cycles, while a shorter overlapping candidate included the first. Selection now
+merges compatible sequences only when at least two shared cycles match and every
+cycle in the overlap has matching boundaries within two analysis samples. It
+retains qualified edge cycles and counts the overlap once, with merge evidence
+saved in the trace. Opposite phases, harmonics and inconsistent boundaries cannot
+be combined. Existing amplitude, shape, return and duration gates are unchanged.
+
+The estimate becomes 11 push-up cycles and 3 pull-up attempts. The participant
+withdrew the earlier recollection of 10 push-ups, so the true total is uncertain.
+The earlier 11 recording replays still preserve counts and boundaries. This is a
+development correction, not a new blind result.
+
 The requested combination, boundary repair and household comparison are complete.
 The first fresh mixed blind test has passed. Further coverage can come from normal
 use rather than repeating strenuous reference sessions. Ordinary movement, stair

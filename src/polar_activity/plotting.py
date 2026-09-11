@@ -49,7 +49,7 @@ def plot_session(
     directory = path / "plots"
     directory.mkdir(exist_ok=True)
     outputs = []
-    for stream, unit in [("acc", "mg"), ("gyro", "deg/s"), ("hr", "bpm")]:
+    for stream, unit in [("acc", "mg"), ("gyro", "deg/s"), ("mag", "µT"), ("hr", "bpm")]:
         rows = read_rows(path / f"{stream}.csv")
         rows = [
             row
@@ -71,12 +71,11 @@ def plot_session(
         )
         axes = axes[:, 0]
         if stream == "hr":
-            axes[0].plot(
-                times, [float(row["hr_bpm"]) for row in rows], color="#b12657", linewidth=1
-            )
-            axes[0].set_ylabel("HR (bpm)")
+            from .heart_rate import plot_heart_rate
+
+            plot_heart_rate(axes[0], rows)
         else:
-            csv_unit = "mg" if stream == "acc" else "dps"
+            csv_unit = {"acc": "mg", "gyro": "dps", "mag": "ut"}[stream]
             values = np.array(
                 [[float(row[f"{stream}_{axis}_{csv_unit}"]) for axis in "xyz"] for row in rows]
             )

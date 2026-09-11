@@ -1,7 +1,7 @@
 # Validation evidence and development history
 
 Current summary, **11 September 2026**: Bluetooth capture, sensor-memory capture,
-BLE/USB download and the personal adaptive analyser are implemented. All **244
+BLE/USB download and the personal adaptive analyser are implemented. All **295
 hardware-free tests pass**, with Ruff and dependency checks passing. Blind-02
 predicted 3 jumps, 10 squats and 11 push-ups before disclosure; the participant
 confirmed all three. This is one fresh session for one participant/placement.
@@ -10,6 +10,45 @@ See [illustrated blind results](examples.md), [adaptive evaluation](adaptive_ana
 and the [installation manual](user_manual.md). Long-session reliability and broader
 recognition accuracy remain open. The entries below are **dated development
 history**; earlier test totals, pending gates and model results describe their stage.
+
+## HR, MAG and final-effort continuation, 2026-09-11
+
+Real `magnetic-01` capture downloaded 8,360 ACC, 8,131 GYRO, 158 HR and 3,168 MAG
+samples. MAG runs at about 20.10 Hz with no internal timestamp gaps; its type-0
+format does not report calibration. HR has 157 valid readings after excluding an
+initial zero. The IMUs have continuous timestamps but GYRO ends 4.326 seconds before
+ACC. Both exercise sets are inside their common coverage; no missing tail samples
+were fabricated. The logs do not establish why that tail is shorter.
+
+After the user disclosed 10 push-ups and 3 pull-ups, bounded continuation recovered
+the third pull-up effort after a 4.28-second rest. That revision estimated 10
+push-ups and 3 pull-up attempts, with only 2 pull-up returns fully observed. The
+original 10/2 prediction remains frozen, and the model was not retrained. All 11
+earlier recording replays preserve their sets, counts, boundaries and unassigned
+attempts. This is development evidence after feedback; see the
+[published comparison](examples.md#magnetic-01-motion-magnetism-and-heart-rate).
+
+The participant then questioned the first push-up and withdrew the remembered
+total of 10. A previously qualified cycle at 17.28–18.84s was lost when a longer
+overlapping sequence displaced a shorter one. Compatible-overlap selection now
+retains that cycle while counting shared cycles once. The latest estimate is
+**11 push-up cycles**, without independent count confirmation. Existing cycle
+thresholds and the prior recordings' counts/boundaries are unchanged. Six new
+checks cover complementary edges, opposite phases, harmonics and conflicting or
+insufficient overlap evidence.
+
+The first sync disconnected during the initial PMD status read before downloading
+or stopping anything. The app now detects link loss promptly and reconnects once
+for that read only, retaining ownership checks and command timing/outcomes. Tests
+cover repeated failure, protocol rejections, malformed status and failures after
+stopping, without replaying mutating commands. Cancellation before data arrives
+now retains the interrupted-session status. No new physical retry test was needed
+for these changes; the new recovery path is verified with simulated failures.
+
+**295 automated tests pass**, with Ruff lint/format and dependency checks passing.
+An additional 42 integrity checks verified raw/frozen artifacts and downloads;
+the personal model hash remains unchanged. HR/MAG stay outside recognition until
+their value is established on held-out recordings with timing/calibration checks.
 
 ## Automatic boundary and complete-cycle counter, 2026-09-10
 

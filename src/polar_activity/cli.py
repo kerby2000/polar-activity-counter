@@ -58,6 +58,7 @@ def parser() -> argparse.ArgumentParser:
             sub.add_argument("--arm", choices=["left", "right", "unknown"], default=None)
             sub.add_argument("--notes", default="")
             sub.add_argument("--no-hr", action="store_true")
+            sub.add_argument("--mag", action="store_true", help="Also record magnetometer at 20 Hz")
             sub.add_argument("--no-interactive", action="store_true")
     sub = commands.add_parser("diagnose")
     sub.add_argument("session", type=Path)
@@ -118,6 +119,8 @@ def parser() -> argparse.ArgumentParser:
         else:
             sub.add_argument("--device")
         if action == "start":
+            sub.add_argument("--mag", action="store_true", help="Also record magnetometer at 20 Hz")
+            sub.add_argument("--no-hr", action="store_true", help="Omit heart-rate recording")
             sub.add_argument("--subject", required=True)
             sub.add_argument("--sensor-position", required=True)
             sub.add_argument("--notes", default="")
@@ -187,6 +190,7 @@ async def ble_command(args: argparse.Namespace) -> None:
             not args.no_interactive,
             args.notes,
             connect_timeout=args.connect_timeout,
+            mag=args.mag,
         )
         return
     selected = await find_device(args.device, args.scan_timeout)

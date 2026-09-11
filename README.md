@@ -18,6 +18,31 @@ as activity estimates. It runs locally and produces PNG, JSON and CSV reports.
 
 ## See it working
 
+### Magnetic-01: catching the difficult last pull-up
+
+The updated analyser estimates **11 push-up cycles and 3 pull-up attempts**. The first two
+pull-ups have clear returns; the final effort follows a **4.3-second pause** and
+ends at dismount, so its return remains marked incomplete. Its arm excursion is
+about **88%** of the earlier efforts—a movement comparison, not a technique score.
+
+![Magnetic-01: eleven estimated push-up cycles, three pull-up attempts, magnetic-field traces and heart-rate recovery](docs/images/magnetic-01-review.png)
+
+This is a **development replay after feedback**: the saved original prediction
+was 10 push-ups and 2 pull-ups. Bounded continuation recovered the last pull-up;
+matching overlapping cycle sequences also restored a valid first push-up that
+selection had discarded. **The participant is uncertain of the push-up total**, so
+11 is an automatic estimate, not a confirmed count. Both fixes use ACC/GYRO, and the
+personal classifier model was unchanged. Replaying all **11 earlier
+recordings** preserved their sets, counts and boundaries, including the blind tests
+and zero counted sets in the household recording.
+
+The new **20 Hz magnetometer** trace shows all three pull-up efforts, while **heart
+rate** adds exertion/recovery context below. Both are recorded and plotted; neither
+currently changes recognition. Raw magnetic readings are not calibrated heading
+or elevation, and offline HR timing is approximate. The participant approved
+sharing this figure, including HR. See [sensor findings](docs/magnetometer.md) and
+[figure provenance](docs/examples.md#magnetic-01-motion-magnetism-and-heart-rate).
+
 ### Blind-02: a fresh test, confirmed after prediction
 
 The model and analysis code were frozen before the activities were disclosed.
@@ -69,12 +94,19 @@ with Python 3.11 and 3.12.
 | Short sets, brief rests and incomplete pull-up attempts | Very short or unfamiliar movements may be missed or misclassified |
 | Walking/stairs/background timeline | No stair direction or step count; sitting and standing are pooled |
 | Motion consistency and relative pull-up excursion | Movement proxies, not an anatomical form or technique assessment |
+| HR by default and optional 20 Hz MAG in online/offline recordings | Review context only; MAG is not a calibrated compass and offline HR timing is approximate |
+| One reconnect for a failed initial offline status read | Start/stop commands are not automatically replayed; longer-session reliability still needs validation |
 | Local CSV/JSON/PNG outputs and acquisition diagnostics | Batch analysis after capture; no live rep display or mobile app yet |
 
 There are known false positives in development recordings. The household check
 produced zero counted sets over 65.36 seconds, including when excluded from training;
 that short check does not establish reliable all-day behaviour. See the
 [full adaptive evaluation](docs/adaptive_analysis.md).
+
+The current local suite passes **295 tests**, including HR/MAG decoding and export,
+slow final efforts, dismounts, bounded sync recovery and cancellation during startup.
+Ruff and dependency checks pass. The initial sync recovery is tested with simulated
+failures; it does not establish the physical cause of a Bluetooth disconnect.
 
 ## Install on Windows
 
@@ -140,7 +172,7 @@ Turn on sensor/heart-rate mode, close competing Polar app connections and replac
 .\.venv\Scripts\python.exe -m polar_activity record --device YOUR_ID --duration 180 --subject me --sensor-position upper_arm_left --output data/raw/online-01
 ```
 
-**Offline:** wait for `Internal ACC + GYRO recording confirmed at 52 Hz` and command
+**Offline:** wait for both the ACC/GYRO and HR recording confirmations and command
 exit, exercise, then return and sync using the same folder:
 
 ```powershell
@@ -152,6 +184,29 @@ These are two separate commands with your exercise **between** them. Ordinary
 button-selected recording on the sensor is not a substitute for starting raw
 ACC/GYRO recording through this app. See [offline details](docs/offline_recording.md)
 and [optional USB download](docs/usb_recording.md).
+
+Both modes include **heart rate** by default (`--no-hr` opts out). New analysis
+plots show HR beside motion and activity estimates. Older offline recordings have
+no HR to recover. Offline HR timing is approximate, and HR is currently context
+for review rather than an input to recognition. See [heart rate, stair direction
+and available sensors](docs/heart_rate_and_elevation.md).
+
+Add **`--mag`** to either recording start command to also save the magnetometer
+at 20 Hz. BLE/USB sync includes `mag.csv`, and plots show X/Y/Z and magnetic-field
+magnitude alongside motion and HR. See [magnetometer recording and sensor fusion](docs/magnetometer.md).
+
+For the four-signal recording illustrated above:
+
+```powershell
+.\.venv\Scripts\python.exe -m polar_activity offline start --device YOUR_ID --mag --subject me --sensor-position upper_arm_left --output data/raw/magnetic-01
+# Exercise after all four streams are confirmed; keep the sensor on.
+.\.venv\Scripts\python.exe -m polar_activity offline sync data/raw/magnetic-01
+```
+
+If the initial sync status request times out or disconnects, the app reconnects
+once before issuing any stop command. Keep the sensor on when recovering a session
+and preserve its folder. Coverage warnings now identify differences at the start
+and end of the IMU streams; missing samples are never filled in as exercise data.
 
 ## Teach it your movement, then analyse
 

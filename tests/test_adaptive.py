@@ -15,7 +15,7 @@ from polar_activity.adaptive import (
     fit_model,
     validate_model,
 )
-from polar_activity.adaptive_counter import short_return_bouts
+from polar_activity.adaptive_counter import select_compatible_chains, short_return_bouts
 from polar_activity.adaptive_pullups import pullup_bouts
 from polar_activity.cli import main
 from polar_activity.recognition import motion_blocks
@@ -54,6 +54,61 @@ def test_short_pause_is_not_a_repetition():
     assert len(bouts) == 1
     assert bouts[0]["complete_cycles"] == 14
     assert len(bouts[0]["pauses"]) == 1
+
+
+@pytest.mark.parametrize("side", ["prefix", "suffix"])
+def test_overlapping_seeds_keep_supported_edge_cycle_without_double_counting(side):
+    def chain(starts, score):
+        cycles = [{"start_time_s": float(s), "end_time_s": float(s + 1)} for s in starts]
+        return {
+            "cycles": cycles,
+            "start_time_s": cycles[0]["start_time_s"],
+            "end_time_s": cycles[-1]["end_time_s"],
+            "shape_similarity": score,
+            "seed_start_time_s": cycles[0]["start_time_s"],
+            "seed_window_s": 4,
+        }
+
+    # A longer candidate wins, but a shorter seed saw a valid cycle at its edge.
+    candidates = (
+        [chain(range(1, 11), 0.95), chain(range(8), 0.97)]
+        if side == "prefix"
+        else [chain(range(10), 0.95), chain(range(7, 11), 0.97)]
+    )
+    original = json.dumps(candidates)
+    selected, merges = select_compatible_chains(candidates, 0.08)
+    assert len(selected) == 1 and len(selected[0]["cycles"]) == 11
+    assert selected[0]["start_time_s"] == 0 and selected[0]["end_time_s"] == 11
+    assert len(merges) == 1 and len(merges[0]["added_cycles"]) == 1
+    assert json.dumps(candidates) == original  # saved candidate evidence stays immutable
+
+
+@pytest.mark.parametrize("conflict", ["opposite_phase", "harmonic", "middle", "one_match"])
+def test_overlapping_chain_does_not_invent_counts_from_incompatible_phase(conflict):
+    base = [{"start_time_s": float(s), "end_time_s": float(s + 1)} for s in range(1, 11)]
+    other = [{"start_time_s": float(s), "end_time_s": float(s + 1)} for s in range(8)]
+    if conflict == "opposite_phase":
+        other = [{k: v + 0.5 for k, v in c.items()} for c in other]
+    elif conflict == "harmonic":
+        other = [{"start_time_s": float(s), "end_time_s": float(s + 2)} for s in range(0, 8, 2)]
+    elif conflict == "middle":
+        other[3] = {k: v + 0.2 for k, v in other[3].items()}
+    else:
+        other = other[:2]
+    candidates = [
+        {
+            "cycles": c,
+            "start_time_s": c[0]["start_time_s"],
+            "end_time_s": c[-1]["end_time_s"],
+            "shape_similarity": 0.99,
+            "seed_start_time_s": c[0]["start_time_s"],
+            "seed_window_s": 4,
+        }
+        for c in (base, other)
+    ]
+    selected, merges = select_compatible_chains(candidates, 0.08)
+    assert len(selected) == 1 and selected[0]["cycles"] == base
+    assert merges == []
 
 
 @pytest.mark.parametrize("kind", ["single", "one_direction", "noise", "drift", "partial"])
@@ -112,6 +167,46 @@ def test_two_equally_quiet_incompatible_poses_remain_ambiguous():
     bouts, trace = pullup_bouts(t, a, g, 4, 24)
     assert not bouts
     assert trace["rejection_reasons"] == ["ambiguous_stable_poses"]
+
+
+@pytest.mark.parametrize(
+    "case", ["returned", "dismount", "weak", "different_plane", "late", "single"]
+)
+def test_established_pullup_continuation_requires_matching_bounded_motion(case):
+    t = np.arange(0, 28, 0.04)
+    angle = np.zeros(len(t))
+    for start in [9] if case == "single" else [4, 9]:
+        m = (t >= start) & (t < start + 3.5)
+        angle[m] = 90 * (1 - np.cos(2 * np.pi * (t[m] - start) / 3.5)) / 2
+    start = 22 if case == "late" else 16
+    m = (t >= start) & (t < start + 4.8)
+    amplitude = 50 if case == "weak" else 82
+    angle[m] = amplitude * (1 - np.cos(2 * np.pi * (t[m] - start) / 4.8)) / 2
+    norm = np.full(len(t), 1000.0)
+    if case == "dismount":
+        m = (t >= 15.2) & (t < 20.5)
+        angle[m] = 82 * (1 - np.cos(np.pi * (t[m] - 15.2) / 5.3)) / 2
+        norm[(t >= 20.5) & (t < 20.7)] = 300
+        angle[t >= 20.5] = 150  # this impact/posture must not count as a return
+    rad = np.radians(angle)
+    a = norm[:, None] * np.c_[np.sin(rad), np.cos(rad), np.zeros(len(t))]
+    g = np.c_[np.zeros(len(t)), np.zeros(len(t)), -np.gradient(angle, t)]
+    if case == "different_plane":
+        a[t >= 16] = a[t >= 16][:, [2, 1, 0]]
+        g[t >= 16] = g[t >= 16][:, [2, 1, 0]]
+    bouts, trace = pullup_bouts(t, a, g, 4, 13.2)
+    events = [e for b in bouts for e in b["cycles"]]
+    assert len(events) == (3 if case in ("returned", "dismount") else 0 if case == "single" else 2)
+    if case in ("returned", "dismount"):
+        assert events[-1]["continuation_after_classifier_boundary"]
+        assert events[-1]["return_observed"] == (case == "returned")
+        assert trace["continuation"]["evidence"]["baseline"] == trace["baseline"]
+        assert events[-1]["end_time_s"] < 20.5 if case == "dismount" else True
+        rotation, _ = np.linalg.qr(np.random.default_rng(15).normal(size=(3, 3)))
+        rotated, _ = pullup_bouts(t, a @ rotation, g @ rotation, 4, 13.2)
+        assert [e["start_time_s"] for b in rotated for e in b["cycles"]] == [
+            e["start_time_s"] for e in events
+        ]
 
 
 def test_two_seconds_of_feature_support_is_not_lost_to_float_rounding():

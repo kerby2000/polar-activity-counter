@@ -4,7 +4,7 @@ For installation and the current end-to-end workflow, see the [user manual](user
 This document also retains the dated physical checks and recovery investigation.
 Replace the historical device ID, subject and folder examples with your own values.
 
-The `offline` commands start accelerometer and gyroscope recording **inside the
+The `offline` commands start accelerometer, gyroscope and heart-rate recording **inside the
 Verity Sense**, disconnect from Bluetooth, and download the saved motion data when
 you return to the PC. No phone recorder or continuous Bluetooth connection is needed.
 This is separate from the sensor's ordinary button-selected training recording:
@@ -100,6 +100,14 @@ before `offline` for console diagnostics. A session's `connection.log` and
 `offline-session.json` preserve connection events, control exchanges, file-transfer
 requests, progress, byte counts and errors. Keep that directory even after failure.
 
+`stop` and `sync` reconnect once automatically if their **initial, read-only PMD
+status request** loses the connection or times out. Ownership checks still run on
+the new response. Start/stop commands, protocol rejections and file transfers are
+not automatically repeated by this recovery. Control exchanges include timestamps,
+elapsed time and outcome, and the manifest retains the recovery reason.
+Keep the sensor **on** while recovering an offline session; do not power-cycle it
+as the first response to a sync failure.
+
 If a download fails, leave the sensor files intact and repeat **the same `sync`
 command**. Successfully downloaded raw files remain locally. Retry downloads the
 selected files again and checks their sizes before decoding. A fully completed sync
@@ -133,13 +141,27 @@ status supplies active types, not a unique remotely queryable session ID.
   indices, including failed/mismatched reads. These are never silently overwritten.
 * `acc.csv`, `gyro.csv`, `packets.jsonl`, `metadata.json`: decoded data compatible
   with `diagnose`, `plot` and `count`.
-* `hr.csv`: empty standard header; this implementation records ACC and gyro only.
+* `hr.csv`: BPM from the separate `HR.REC` stream for new default sessions;
+  empty for older sessions or those started with `--no-hr`.
 * `labels.csv`: empty initially; later manual labels are preserved on export retry.
 
 Both IMUs retain integer device timestamps and share one time origin: the earliest
 saved sample. Host arrival fields are empty/null because Bluetooth was disconnected
 during acquisition. File-header dates are retained as reported, without claiming
 that the sensor clock was calibrated to UTC. Download UTC is recorded separately.
+
+New starts also print **Internal HR recording confirmed**. The start manifest
+records the requested streams so an older IMU-only session never claims unrelated
+HR files. HR uses fixed settings in normal mode, not PPI or raw optical recording.
+Its nominal 1 Hz timeline comes from the whole-second file header and sample
+index; missing internal HR samples and first-sample phase cannot be measured.
+The combined analysis plot marks this timing as approximate. See
+[HR capture and elevation limitations](heart_rate_and_elevation.md).
+
+`offline start --mag ...` additionally requests PMD type 6 at 20 Hz. The owned
+streams include MAG; sync requires its complete `MAG.REC`/numbered split files and
+exports `mag.csv` with the original device clock and microtesla axes. It does not
+change ACC/GYRO timestamps or rep counts. [Magnetometer guide](magnetometer.md).
 
 Transfers validate RFC76 sequence numbers and reported file byte counts. Local
 hashes detect later changes; they are **not a sensor-provided end-to-end checksum**.
