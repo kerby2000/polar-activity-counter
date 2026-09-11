@@ -43,6 +43,18 @@ useful; ambiguous counts and questionable attempts should remain marked uncertai
 
 ## Research directions
 
+Optional 20 Hz MAG capture, export and plots are implemented. Investigate orientation
+fusion and correlations across activities and locations, with calibration and
+magnetic-disturbance handling before using heading. Keep location/background
+recordings held out so a metal exercise bar does not become an activity shortcut.
+See [magnetometer experiments](magnetometer.md).
+
+HR capture and display are implemented for online and offline sessions. Next
+compare motion-only recognition with HR-assisted stair-direction estimates on
+held-out ascent/descent recordings, including recovery after other exercises.
+Account for HR lag and approximate offline timing; do not infer elevation from
+orientation or magnetic heading. See [sensor capabilities](heart_rate_and_elevation.md).
+
 Stair direction/step counts, sitting versus standing, more jump styles and more
 exercise types need new evidence. An upper-arm sensor may not provide enough
 information for some of these distinctions. Technique assessment would require

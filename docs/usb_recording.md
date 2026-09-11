@@ -5,7 +5,7 @@ and a new session. The measured results below describe the original physical che
 its analysis used the legacy engine. Current recognition uses `--engine adaptive`
 with your own trained model.
 
-The `usb` commands copy ACC/GYRO recordings through the supplied USB adapter and
+The `usb` commands copy ACC/GYRO and requested HR/MAG recordings through the supplied USB adapter and
 export the same CSV/packet format used by `offline sync` and `analyze`. They use
 Windows' native HID support through the optional `hidapi` dependency. They do not
 use Bluetooth, FlowSync, a cloud account or a replacement USB driver for downloads.
@@ -70,8 +70,9 @@ For a first download without reference hashes, the USB serial must match the
 source manifest's Polar ID. If firmware uses a different serial representation,
 save the scan output for inspection; the existing BLE sync remains available.
 
-Both IMUs and all sequential split files must be present. Sequential ACC/GYRO
-starts may use adjacent one-second recording directories, as seen in pullups-02.
+Both IMUs, requested HR/MAG and all sequential split files must be present. Sequential
+starts may span at most one second per additional requested stream (one second for
+two streams, two for three, three for four).
 More widely separated starts or multiple new directories for one stream are
 refused rather than combined.
 
@@ -87,8 +88,9 @@ The device directory is checked again after download. CSV exports are published
 only after all selected files are verified and the listing is stable. Completion
 describes those files; it does not independently prove requested wall-time
 coverage. Original timestamps, scale factors and decoder quality checks remain in
-effect. Offline recordings have no host arrival times and no HR samples in these
-ACC/GYRO files.
+effect. Offline recordings have no host arrival times. HR comes from a separate
+`HR.REC` file with [approximate nominal timing](heart_rate_and_elevation.md), and
+is absent from older IMU-only sessions.
 
 After an interruption, reconnect the adapter and repeat **the same sync command**.
 Verified local files are hash-checked and reused; an incomplete file is downloaded

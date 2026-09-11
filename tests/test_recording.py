@@ -175,10 +175,26 @@ def test_partial_startup_stops_already_started_acc(tmp_path, fake_factory, ble_d
     assert json.loads((directory / "metadata.json").read_text())["status"] == "failed"
 
 
-def test_cancellation_finalizes_and_disconnects(tmp_path, fake_factory, ble_device):
+@pytest.mark.parametrize("phase", ["startup", "streaming"])
+def test_cancellation_finalizes_and_disconnects(tmp_path, fake_factory, ble_device, phase):
     directory = tmp_path / "cancelled"
 
     async def run():
+        devices = []
+        inspecting = asyncio.Event()
+
+        def factory(*args, **kwargs):
+            device = fake_factory(*args, **kwargs)
+            devices.append(device)
+            if phase == "startup":
+
+                async def inspect():
+                    inspecting.set()
+                    await asyncio.Event().wait()
+
+                device.inspect = inspect
+            return device
+
         task = asyncio.create_task(
             record_session(
                 directory,
@@ -187,11 +203,17 @@ def test_cancellation_finalizes_and_disconnects(tmp_path, fake_factory, ble_devi
                 "unknown",
                 300,
                 interactive=False,
-                device_factory=fake_factory,
+                device_factory=factory,
                 selected_device=ble_device,
             )
         )
-        await asyncio.sleep(0.02)
+        # Synchronize on the acquisition stage, not a Windows scheduling delay.
+        async with asyncio.timeout(2):
+            if phase == "startup":
+                await inspecting.wait()
+            else:
+                while not devices or "hr" not in devices[0].active:
+                    await asyncio.sleep(0.005)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
@@ -199,7 +221,8 @@ def test_cancellation_finalizes_and_disconnects(tmp_path, fake_factory, ble_devi
     asyncio.run(run())
     assert not FakeClient.instances[-1].is_connected
     meta = json.loads((directory / "metadata.json").read_text())
-    assert meta["status"] == "interrupted" and meta["quality"]["acc"]["samples"] == 208
+    assert meta["status"] == "interrupted"
+    assert meta["quality"]["acc"]["samples"] == (208 if phase == "streaming" else 0)
 
 
 def test_normal_finish_records_termination_before_cleanup(recorded):

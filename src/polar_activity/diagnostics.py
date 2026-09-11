@@ -63,8 +63,15 @@ def diagnose(path: Path, metadata: dict | None = None) -> dict:
         "duration_s": metadata.get("recording_duration_s"),
         "warnings": list(metadata.get("warnings", [])),
     }
-    for stream in ("acc", "gyro"):
-        rate = metadata.get("configurations", {}).get(stream, {}).get("sample_rate", 52)
+    streams = ["acc", "gyro"]
+    if metadata.get("mag_enabled") or (path / "mag.csv").exists():
+        streams.append("mag")
+    for stream in streams:
+        rate = (
+            metadata.get("configurations", {})
+            .get(stream, {})
+            .get("sample_rate", 20 if stream == "mag" else 52)
+        )
         result[stream] = stream_quality(read_rows(path / f"{stream}.csv"), rate)
         quality = result[stream]
         if not quality["samples"]:
@@ -86,7 +93,19 @@ def diagnose(path: Path, metadata: dict | None = None) -> dict:
     mismatch = abs(acc["duration_s"] - gyro["duration_s"])
     result["acc_gyro_duration_mismatch_s"] = mismatch
     result["acc_gyro_overlap_s"] = 0
+    result["acc_gyro_edge_offsets_s"] = None
     if acc["samples"] and gyro["samples"]:
+        edges = {
+            "gyro_start_after_acc_s": (
+                gyro["first_device_timestamp_ns"] - acc["first_device_timestamp_ns"]
+            )
+            / 1e9,
+            "gyro_end_before_acc_s": (
+                acc["last_device_timestamp_ns"] - gyro["last_device_timestamp_ns"]
+            )
+            / 1e9,
+        }
+        result["acc_gyro_edge_offsets_s"] = edges
         result["acc_gyro_overlap_s"] = max(
             0,
             (
@@ -95,21 +114,22 @@ def diagnose(path: Path, metadata: dict | None = None) -> dict:
             )
             / 1e9,
         )
-        if mismatch > max(0.5, 2 / acc["expected_rate_hz"]):
+        if max(mismatch, *(abs(v) for v in edges.values())) > max(0.5, 2 / acc["expected_rate_hz"]):
             result["warnings"].append(
-                "ACC/gyro duration mismatch exceeds 0.5s (startup/shutdown may differ)"
+                "ACC/gyro coverage differs by more than 0.5s (startup/shutdown may differ); "
+                f"GYRO start relative to ACC: {edges['gyro_start_after_acc_s']:+.3f}s; "
+                f"GYRO end relative to ACC: {-edges['gyro_end_before_acc_s']:+.3f}s. "
+                "Inspect stream gaps separately; missing edge samples cannot be reconstructed."
             )
         if not result["acc_gyro_overlap_s"]:
             result["warnings"].append("ACC and gyro have no overlapping device-time interval")
-    hr_values = [int(row["hr_bpm"]) for row in read_rows(path / "hr.csv")]
-    result["hr"] = dict(
-        samples=len(hr_values),
-        mean_bpm=sum(hr_values) / len(hr_values) if hr_values else None,
-        min_bpm=min(hr_values, default=None),
-        max_bpm=max(hr_values, default=None),
-    )
-    if metadata.get("hr_enabled") and not hr_values:
-        result["warnings"].append("HR enabled but no HR samples arrived")
+    from .heart_rate import summary
+
+    result["hr"] = summary(read_rows(path / "hr.csv"))
+    if metadata.get("hr_enabled") and not result["hr"]["valid_samples"]:
+        result["warnings"].append(
+            "HR enabled but no valid HR samples arrived; check sensor contact"
+        )
     sets = read_rows(path / "labels.csv")
     result["labels"] = dict(Counter(s["activity"] for s in sets))
     result["unknown_rep_counts"] = sum(not s["expected_rep_count"] for s in sets)
@@ -125,7 +145,7 @@ def diagnose(path: Path, metadata: dict | None = None) -> dict:
 
 def format_report(quality: dict) -> str:
     lines = ["Session quality report", f"Recording duration: {quality['duration_s']} s"]
-    for stream in ("acc", "gyro"):
+    for stream in (s for s in ("acc", "gyro", "mag") if s in quality):
         value = quality[stream]
         rate = value["measured_rate_hz"]
         rate_text = f"{rate:.3f}" if rate is not None else "unavailable"

@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 
 from bleak import BleakClient, BleakScanner
 from bleak.backends.device import BLEDevice
+from bleak.exc import BleakError
 from polar_python.constants import PmdMeasurementType, PolarCharacteristic
 
 from .protocol import AcquisitionError, StreamConfig, conversion_factor, parse_settings
@@ -18,6 +19,10 @@ LOG = logging.getLogger(__name__)
 CP = PolarCharacteristic.PMD_CONTROL_POINT.value
 DATA = PolarCharacteristic.PMD_DATA.value
 HR = PolarCharacteristic.HEART_RATE.value
+
+
+class PmdTransportError(AcquisitionError):
+    """No reliable command result: a fresh connection is required before reuse."""
 
 
 @dataclass(frozen=True)
@@ -153,7 +158,7 @@ class SenseDevice:
                     "Windows canceled the GATT request; this does not necessarily mean "
                     "you clicked Cancel. The application does not request re-pairing. "
                     "Close the Windows pairing dialog and other sensor apps, then "
-                    "power-cycle the sensor and retry."
+                    "retry. Keep the sensor on while recovering an offline recording."
                 )
             raise AcquisitionError(f"{stage} failed: {detail}. {advice}") from exc
 
@@ -173,7 +178,9 @@ class SenseDevice:
         self.sink(Packet(stream, bytes(data), mono, utc))
 
     def _data(self, _sender: object, data: bytearray) -> None:
-        stream = {2: "acc", 5: "gyro"}.get(data[0] & 0x3F, "unknown") if data else "unknown"
+        stream = (
+            {2: "acc", 5: "gyro", 6: "mag"}.get(data[0] & 0x3F, "unknown") if data else "unknown"
+        )
         self._packet(stream, data)
 
     async def command(self, request: bytes) -> dict[str, list[int]]:
@@ -183,46 +190,82 @@ class SenseDevice:
         async with self.lock:
             if self.poisoned:
                 raise AcquisitionError("PMD command channel timed out; reconnect before reuse")
-            exchange: dict = {"request_hex": request.hex(), "response_hex": []}
+            started = time.monotonic()
+            exchange: dict = {
+                "request_hex": request.hex(),
+                "response_hex": [],
+                "started_utc": datetime.now(UTC).isoformat(),
+            }
             self.exchanges.append(exchange)
+            response_task = asyncio.create_task(self._command_response(request, exchange))
+            disconnect_task = asyncio.create_task(self.disconnected.wait())
             try:
                 async with asyncio.timeout(self.timeout):
-                    await self.client.write_gatt_char(CP, request, response=True)
-                    payload = bytearray()
-                    while True:
-                        answer = await self.responses.get()
-                        exchange["response_hex"].append(answer.hex())
-                        expected_type = request[1] & 0x3F if len(request) > 1 else None
-                        if (
-                            len(answer) < 4
-                            or answer[:2] != bytes([0xF0, request[0]])
-                            or (expected_type is not None and answer[2] & 0x3F != expected_type)
-                        ):
-                            self.poisoned = True
-                            raise AcquisitionError(
-                                "Unexpected PMD response; reconnect before reuse"
-                            )
-                        if answer[3]:
-                            raise AcquisitionError(
-                                f"PMD operation {request[0]} type {expected_type} "
-                                f"rejected with code {answer[3]}. Stop other "
-                                "online/offline recordings and use sensor mode."
-                            )
-                        payload.extend(answer[5:])
-                        if len(payload) > 8192:
-                            self.poisoned = True
-                            raise AcquisitionError("PMD response exceeds size limit; reconnect")
-                        if len(answer) == 4 or not answer[4]:
-                            return bytes(payload)
-            except asyncio.CancelledError:
-                self.poisoned = True
+                    done, _ = await asyncio.wait(
+                        [response_task, disconnect_task], return_when=asyncio.FIRST_COMPLETED
+                    )
+                    if response_task not in done:
+                        raise PmdTransportError(
+                            "Sensor disconnected while awaiting PMD response; reconnect and retry."
+                        )
+                    result = await response_task
+                    exchange["outcome"] = "ok"
+                    return result
+            except BaseException as exc:
+                exchange["outcome"] = (
+                    "cancelled" if isinstance(exc, asyncio.CancelledError) else "error"
+                )
+                exchange["error"] = str(exc) or type(exc).__name__
+                if isinstance(
+                    exc,
+                    (TimeoutError, BleakError, OSError, PmdTransportError, asyncio.CancelledError),
+                ):
+                    self.poisoned = True
+                if isinstance(exc, TimeoutError):
+                    raise PmdTransportError(
+                        f"PMD command timed out after {self.timeout:g}s; reconnect and retry. "
+                        "Keep the sensor on to preserve an offline recording."
+                    ) from exc
+                if isinstance(exc, (BleakError, OSError)):
+                    raise PmdTransportError(
+                        f"PMD Bluetooth transport failed: {exc}; reconnect and retry."
+                    ) from exc
                 raise
-            except TimeoutError as exc:
+            finally:
+                for task in (response_task, disconnect_task):
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(response_task, disconnect_task, return_exceptions=True)
+                exchange["elapsed_s"] = time.monotonic() - started
+
+    async def _command_response(self, request, exchange):
+        if self.disconnected.is_set() or not self.client.is_connected:
+            raise PmdTransportError("Sensor disconnected before PMD command; reconnect and retry.")
+        await self.client.write_gatt_char(CP, request, response=True)
+        payload = bytearray()
+        while True:
+            answer = await self.responses.get()
+            exchange["response_hex"].append(answer.hex())
+            expected_type = request[1] & 0x3F if len(request) > 1 else None
+            if (
+                len(answer) < 4
+                or answer[:2] != bytes([0xF0, request[0]])
+                or (expected_type is not None and answer[2] & 0x3F != expected_type)
+            ):
                 self.poisoned = True
+                raise AcquisitionError("Unexpected PMD response; reconnect before reuse")
+            if answer[3]:
                 raise AcquisitionError(
-                    "PMD command timed out. Check sensor power, Bluetooth and "
-                    "other connected apps; reconnect and retry."
-                ) from exc
+                    f"PMD operation {request[0]} type {expected_type} "
+                    f"rejected with code {answer[3]}. Stop other "
+                    "online/offline recordings and use sensor mode."
+                )
+            payload.extend(answer[5:])
+            if len(payload) > 8192:
+                self.poisoned = True
+                raise AcquisitionError("PMD response exceeds size limit; reconnect")
+            if len(answer) == 4 or not answer[4]:
+                return bytes(payload)
 
     async def inspect(self) -> dict:
         try:
@@ -241,6 +284,7 @@ class SenseDevice:
             if k.name != "RFU"
         }
         available["hr"] = self.client.services.get_characteristic(HR) is not None
+        available["offline_hr"] = len(features) > 2 and bool(features[2] & 0x40)
         report = {
             "name": self.device.name,
             "address": self.device.address,
@@ -287,7 +331,7 @@ class SenseDevice:
         return report
 
     async def start(self, stream: str, config: StreamConfig) -> None:
-        kind = PmdMeasurementType.ACC if stream == "acc" else PmdMeasurementType.GYRO
+        kind = PmdMeasurementType({"acc": 2, "gyro": 5, "mag": 6}[stream])
         response = await self.command(bytes(config.settings(kind).to_bytes()))
         self.active.append(stream)  # Stop even if a supplied factor is malformed.
         self.factors[stream] = conversion_factor(response)
@@ -305,7 +349,7 @@ class SenseDevice:
         if self.poisoned:
             errors.append(
                 "PMD channel desynchronized; stop acknowledgements unavailable. "
-                "Power-cycle the sensor before the next session."
+                "Keep the sensor on if recording offline; reconnect to check and stop the session."
             )
         for stream in reversed(self.active):
             try:
@@ -317,7 +361,7 @@ class SenseDevice:
                     async with asyncio.timeout(self.timeout):
                         await self.client.stop_notify(HR)
                 elif not self.poisoned and self.client.is_connected:
-                    await self.command(bytes([3, 2 if stream == "acc" else 5]))
+                    await self.command(bytes([3, {"acc": 2, "gyro": 5, "mag": 6}[stream]]))
             except Exception as exc:
                 errors.append(f"Stopping {stream}: {exc}")
                 LOG.warning("%s", errors[-1])

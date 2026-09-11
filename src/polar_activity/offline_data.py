@@ -10,6 +10,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from .diagnostics import diagnose
+from .heart_rate import HR_FIELDS, OFFLINE_HR_TIMING
+from .magnetometer import calibration_fields, decode_mag
 from .protocol import (
     AcquisitionError,
     StreamConfig,
@@ -45,9 +47,26 @@ def recover_duplicate_blocks(data: bytes, packets: list[bytes], expected: int, s
         )
     decoded = parse_recording(candidate, stream)
     stamps = [frame["last"] for frame in decoded["frames"]]
-    if any(b <= a for a, b in zip(stamps, stamps[1:], strict=False)):
+    if stream != "hr" and any(b <= a for a, b in zip(stamps, stamps[1:], strict=False)):
         raise AcquisitionError("Recovered file has duplicate/backward frame timestamps")
     return candidate, removed
+
+
+def decode_offline_hr(payload):
+    # Polar SDK OfflineHrData: raw type 0 = BPM; raw type 1 = BPM/quality/corrected BPM.
+    if len(payload) < 11 or payload[0] & 0x3F != 14 or payload[9] not in (0, 1):
+        raise AcquisitionError("Unsupported or empty offline HR frame")
+    width = 1 if payload[9] == 0 else 3
+    if (len(payload) - 10) % width:
+        raise AcquisitionError("Truncated offline HR sample")
+    return [
+        {
+            "hr_bpm": payload[i],
+            "ppg_quality": payload[i + 1] if width == 3 else "",
+            "corrected_hr_bpm": payload[i + 2] if width == 3 else "",
+        }
+        for i in range(10, len(payload), width)
+    ]
 
 
 def parse_recording(data: bytes, stream: str) -> dict:
@@ -77,33 +96,41 @@ def parse_recording(data: bytes, stream: str) -> dict:
         raise AcquisitionError("Invalid offline recording date") from None
     settings_bytes = take(take(1)[0])
     settings = parse_settings(settings_bytes)
+    config = None
     try:
-        values = {k: settings[k][0] for k in ("sample_rate", "resolution", "range", "channels")}
-        if any(len(settings[k]) != 1 for k in values) or values["sample_rate"] <= 0:
-            raise ValueError()
-        config = StreamConfig(**values)
+        if stream == "hr":
+            # HR uses fixed settings; empty settings are present in the SDK fixture.
+            if settings.get("sample_rate", [1]) != [1]:
+                raise AcquisitionError("Unsupported offline HR sample rate")
+        else:
+            config = _imu_config(settings, stream)
     except (KeyError, IndexError, ValueError):
         raise AcquisitionError("Offline recording lacks a single valid IMU configuration") from None
-    if config.channels != 3 or config.resolution != 16:
-        raise AcquisitionError("Unsupported offline IMU channels/resolution")
     security_length = take(1)[0]
     security = take(security_length)
     if security not in (b"", b"\x00"):
         raise AcquisitionError("Encrypted offline payload is not supported")
-    factor = conversion_factor(settings)
+    factor = conversion_factor(settings) if stream != "hr" else None
     frames = []
     while offset < len(data):
         size = int.from_bytes(take(2), "little")
         frame_offset = offset
         payload = take(size)
-        if size < 10 or payload[0] & 0x3F != {"acc": 2, "gyro": 5}[stream]:
+        if size < 10 or payload[0] & 0x3F != {"acc": 2, "gyro": 5, "hr": 14, "mag": 6}[stream]:
             raise AcquisitionError("Invalid offline frame length or measurement type")
-        last, samples = decode_imu(payload, config, factor)
+        if stream == "hr":
+            last, samples = int.from_bytes(payload[1:9], "little"), decode_offline_hr(payload)
+        elif stream == "mag":
+            last, samples, calibration = decode_mag(payload, config, factor)
+        else:
+            last, samples = decode_imu(payload, config, factor)
         if not samples:
-            raise AcquisitionError("Offline IMU frame contains no samples")
+            raise AcquisitionError("Offline frame contains no samples")
         frames.append(
             {"offset": frame_offset, "payload": payload, "last": last, "samples": samples}
         )
+        if stream == "mag":
+            frames[-1]["calibration"] = calibration
     if not frames:
         raise AcquisitionError(
             "Offline recording contains no samples; record longer before stopping"
@@ -117,10 +144,29 @@ def parse_recording(data: bytes, stream: str) -> dict:
         },
         "config": config,
         "factor": factor,
-        "factor_source": "device_file" if "factor" in settings else "polar_sdk_default",
+        "factor_source": (
+            None
+            if stream == "hr"
+            else "device_file"
+            if "factor" in settings
+            else "polar_sdk_default"
+        ),
         "settings_hex": settings_bytes.hex(),
         "frames": frames,
     }
+
+
+def _imu_config(settings, stream="acc"):
+    try:
+        values = {k: settings[k][0] for k in ("sample_rate", "resolution", "range", "channels")}
+        if any(len(settings[k]) != 1 for k in values) or values["sample_rate"] <= 0:
+            raise ValueError()
+        config = StreamConfig(**values)
+    except (KeyError, IndexError, ValueError):
+        raise AcquisitionError("Offline recording lacks a single valid IMU configuration") from None
+    if config.channels not in ((3, 4) if stream == "mag" else (3,)) or config.resolution != 16:
+        raise AcquisitionError("Unsupported offline IMU channels/resolution")
+    return config
 
 
 def _csv(path, fields, rows):
@@ -132,9 +178,68 @@ def _csv(path, fields, rows):
     os.replace(temporary, path)
 
 
+def _hr_rows(session, downloads, anchor, packets, headers):
+    rows = []
+    origin = None
+    previous_header = None
+    sample_index = 0
+    for source in downloads:
+        if source["stream"] != "hr":
+            continue
+        data = (session / source["local_path"]).read_bytes()
+        if hashlib.sha256(data).hexdigest() != source["sha256"]:
+            raise AcquisitionError("Downloaded HR file hash mismatch")
+        record = parse_recording(data, "hr")
+        headers.append(
+            {"path": source["path"], **record["header"], "settings_hex": record["settings_hex"]}
+        )
+        start = datetime.fromisoformat(record["header"]["started_utc"])
+        delta = start - datetime(2000, 1, 1, tzinfo=UTC)
+        header_ns = (delta.days * 86400 + delta.seconds) * 10**9
+        # SDK HR samples carry no individual timestamps (even the frame timestamp
+        # can be zero). Keep the original packet; label this nominal timeline.
+        # A repeated split-file header continues the same sample index. A new
+        # header starts a new interval, and must not overlap the preceding one.
+        if previous_header != header_ns:
+            if rows and header_ns + 10**9 <= origin + sample_index * 10**9:
+                raise AcquisitionError("Offline HR split headers overlap or go backwards")
+            origin, sample_index = header_ns, 0
+        previous_header = header_ns
+        for frame in record["frames"]:
+            packet_id = len(packets) + 1
+            packets.append(
+                {
+                    "packet_id": packet_id,
+                    "stream": "hr",
+                    "payload_hex": frame["payload"].hex(),
+                    "source": "sensor_memory",
+                    "source_path": source["path"],
+                    "source_offset": frame["offset"],
+                    "host_monotonic_ns": None,
+                    "host_time_utc": None,
+                }
+            )
+            for sample in frame["samples"]:
+                sample_index += 1
+                rows.append(
+                    {
+                        **dict.fromkeys(HR_FIELDS, ""),
+                        **sample,
+                        "time_s": (origin + sample_index * 10**9 - anchor) / 1e9,
+                        "packet_id": packet_id,
+                        "sample_index": sample_index - 1,
+                        "packet_timestamp_ns": frame["last"],
+                        "timestamp_method": "offline_header_1hz_estimate",
+                    }
+                )
+    return rows
+
+
 def export_recordings(session: Path, manifest: dict, downloads: list[dict]) -> dict:
     """Preserve raw files, reject malformed frames, and use one device clock for both IMUs."""
     rows = {"acc": [], "gyro": []}
+    if "mag" in manifest.get("requested_streams", []):
+        rows["mag"] = []
     packets = []
     configurations = {}
     factors = {}
@@ -183,7 +288,7 @@ def export_recordings(session: Path, manifest: dict, downloads: list[dict]) -> d
                         "host_time_utc": None,
                     }
                 )
-                unit = "mg" if stream == "acc" else "dps"
+                unit = {"acc": "mg", "gyro": "dps", "mag": "ut"}[stream]
                 for index, (stamp, xyz) in enumerate(zip(stamps, frame["samples"], strict=True)):
                     rows[stream].append(
                         {
@@ -200,26 +305,33 @@ def export_recordings(session: Path, manifest: dict, downloads: list[dict]) -> d
                             },
                         }
                     )
-    anchor = min(items[0]["device_timestamp_ns"] for items in rows.values())
-    duration = (max(items[-1]["device_timestamp_ns"] for items in rows.values()) - anchor) / 1e9
+                    if stream == "mag":
+                        rows[stream][-1].update(calibration_fields(frame["calibration"][index]))
+    # Auxiliary streams must not shift the motion origin or change existing predictions.
+    anchor = min(rows[s][0]["device_timestamp_ns"] for s in ("acc", "gyro"))
+    duration = (max(rows[s][-1]["device_timestamp_ns"] for s in ("acc", "gyro")) - anchor) / 1e9
+    hr_rows = _hr_rows(session, downloads, anchor, packets, headers)
+    if "hr" in manifest.get("requested_streams", []) and not hr_rows:
+        raise AcquisitionError("Requested HR recording is missing; retain files and retry sync")
     for stream, items in rows.items():
         for row in items:
             row["time_s"] = (row["device_timestamp_ns"] - anchor) / 1e9
         _csv(session / f"{stream}.csv", ["time_s", *[k for k in items[0] if k != "time_s"]], items)
     _csv(
         session / "hr.csv",
-        [
-            "time_s",
-            "host_monotonic_ns",
-            "host_time_utc",
-            "packet_id",
-            "hr_bpm",
-            "contact_supported",
-            "contact_detected",
-            "energy_expended",
-            "rr_intervals_ms",
-        ],
-        [],
+        HR_FIELDS
+        + (
+            [
+                "ppg_quality",
+                "corrected_hr_bpm",
+                "sample_index",
+                "packet_timestamp_ns",
+                "timestamp_method",
+            ]
+            if hr_rows
+            else []
+        ),
+        hr_rows,
     )
     # Offline labels are supplied later by the user; do not infer boundaries from filenames.
     if not (session / "labels.csv").exists():
@@ -250,7 +362,9 @@ def export_recordings(session: Path, manifest: dict, downloads: list[dict]) -> d
         "notes": manifest["notes"],
         "device": manifest["device"],
         "status": "complete",
-        "hr_enabled": False,
+        "hr_enabled": bool(hr_rows),
+        "mag_enabled": "mag" in rows,
+        "hr_timing": OFFLINE_HR_TIMING if hr_rows else None,
         "configurations": configurations,
         "scale_factors": factors,
         "scale_factor_sources": factor_sources,

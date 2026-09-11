@@ -53,7 +53,12 @@ def parse_settings(payload: bytes) -> dict[str, list[int]]:
 
 
 def choose_config(settings: dict[str, list[int]], stream: str) -> StreamConfig:
-    desired = dict(sample_rate=52, resolution=16, range=8 if stream == "acc" else 2000, channels=3)
+    desired = dict(
+        sample_rate=20 if stream == "mag" else 52,
+        resolution=16,
+        range={"acc": 8, "gyro": 2000, "mag": 50}[stream],
+        channels=3,
+    )
     for key, value in desired.items():
         if value not in settings.get(key, []):
             raise AcquisitionError(

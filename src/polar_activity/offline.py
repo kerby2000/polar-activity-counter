@@ -13,14 +13,28 @@ from pathlib import Path
 from polar_python.constants import PmdMeasurementType
 
 from .connection_log import ConnectionLog
-from .device import SenseDevice, find_device
+from .device import PmdTransportError, SenseDevice, find_device
 from .offline_data import export_recordings, parse_recording, recover_duplicate_blocks
 from .pftp import FileTransfer
 from .protocol import AcquisitionError, choose_config
 from .storage import write_json
 
 KINDS = {"acc": 2, "gyro": 5}
+ALL_KINDS = {**KINDS, "hr": 14, "mag": 6}
 MANIFEST = "offline-session.json"
+
+
+def session_streams(manifest):
+    streams = manifest.get("requested_streams", list(KINDS))
+    allowed = [["acc", "gyro"] + h + m for h in ([], ["hr"]) for m in ([], ["mag"])]
+    if streams not in allowed:
+        raise AcquisitionError("Invalid requested streams in offline manifest")
+    return streams
+
+
+def busy(status):
+    # Polar permits the standard online HR service alongside offline HR.
+    return any(v["offline"] or (s != "hr" and v["online"]) for s, v in status.items())
 
 
 def now():
@@ -41,30 +55,31 @@ async def measurement_status(device) -> dict[str, dict]:
         values[kind] = {"online": bool(value & 0x40), "offline": bool(value & 0x80)}
     if not all(kind in values for kind in KINDS.values()):
         raise AcquisitionError("Measurement status does not include both ACC and gyro")
-    return {stream: values[kind] for stream, kind in KINDS.items()}
+    return {stream: values[kind] for stream, kind in ALL_KINDS.items() if kind in values}
 
 
-async def stop_owned(device, manifest, save):
-    status = await measurement_status(device)
-    if any(v["online"] for v in status.values()):
+async def stop_owned(device, manifest, save, *, initial_status=None):
+    status = await measurement_status(device) if initial_status is None else initial_status
+    if any(v["online"] for s, v in status.items() if s != "hr"):
         raise AcquisitionError("A live IMU recording is running; stop it in its owning app first")
-    if any(status[s]["offline"] for s in manifest.get("stop_acknowledged", [])):
-        raise AcquisitionError("A stopped stream was restarted; refusing to stop another session")
     owned = manifest.get("start_requests", [])
+    stopped = manifest.get("stop_acknowledged", [])
+    if any(s not in session_streams(manifest) or s not in status for s in [*owned, *stopped]):
+        raise AcquisitionError("Invalid or unavailable stream ownership in offline manifest")
+    if any(status[s]["offline"] for s in stopped):
+        raise AcquisitionError("A stopped stream was restarted; refusing to stop another session")
     for stream in reversed(owned):
-        if stream not in KINDS:
-            raise AcquisitionError("Invalid stream ownership in offline manifest")
         if status[stream]["offline"]:
-            await device.command_raw(bytes([3, KINDS[stream]]))
+            await device.command_raw(bytes([3, ALL_KINDS[stream]]))
             manifest.setdefault("stop_acknowledged", []).append(stream)
             save()
     deadline = time.monotonic() + 15
     while True:
         status = await measurement_status(device)
-        if not any(v["offline"] or v["online"] for v in status.values()):
+        if not busy(status):
             break
         if time.monotonic() > deadline:
-            raise AcquisitionError("Sensor has not confirmed IMU recording stopped; retry sync")
+            raise AcquisitionError("Sensor has not confirmed recording stopped; retry sync")
         await asyncio.sleep(0.25)
     manifest["state"] = "stopped"
     manifest.setdefault("stopped_utc", now())
@@ -83,7 +98,7 @@ def select_new_files(manifest, entries):
         else:
             selected.append(entry)
     ordered = []
-    for stream in KINDS:
+    for stream in session_streams(manifest):
         group = [e for e in selected if e["stream"] == stream]
         if not group:
             raise AcquisitionError(
@@ -96,7 +111,7 @@ def select_new_files(manifest, entries):
             )
 
         def part(entry):
-            match = re.fullmatch(r"(?:ACC|GYRO)(\d*)\.REC", entry["path"].rsplit("/", 1)[-1])
+            match = re.fullmatch(r"(?:ACC|GYRO|HR|MAG)(\d*)\.REC", entry["path"].rsplit("/", 1)[-1])
             if not match:
                 raise AcquisitionError("Unexpected recording filename")
             return int(match.group(1) or 0)
@@ -112,18 +127,29 @@ def select_new_files(manifest, entries):
 
 async def prepare_session(device, ftp, path: Path, manifest: dict):
     status = await measurement_status(device)
-    if any(v["online"] or v["offline"] for v in status.values()):
+    if busy(status):
         raise AcquisitionError(
-            "ACC or gyro is already recording; refusing to take over that session"
+            "A sensor stream is already recording; refusing to take over that session"
         )
     manifest["device"] = await device.inspect()
+    if "hr" in session_streams(manifest) and (
+        "hr" not in status or not manifest["device"]["available_streams"].get("offline_hr")
+    ):
+        raise AcquisitionError("Offline HR is unavailable; use --no-hr to record only ACC/GYRO")
     manifest["disk_before"] = await ftp.disk_space()
     if manifest["disk_before"]["free_bytes"] < 2 * 1024 * 1024:
         raise AcquisitionError(
             "Sensor has less than 2 MiB free; preserve/download existing recordings first"
         )
     manifest["configurations"] = {}
-    for stream, kind in KINDS.items():
+    for stream in session_streams(manifest):
+        if stream == "hr":
+            continue
+        kind = ALL_KINDS[stream]
+        if stream not in status or not manifest["device"]["available_streams"].get(stream):
+            raise AcquisitionError(
+                f"Offline {stream.upper()} is unavailable; omit --mag if unsupported"
+            )
         settings = await device.command(bytes([1, kind | 0x80]))
         manifest["configurations"][stream] = asdict(choose_config(settings, stream))
     # Offline-record APIs in Polar's SDK use direct file GETs. Full Flow-style
@@ -139,26 +165,33 @@ async def start_session(device, path: Path, manifest: dict):
 
     # Check again after preflight, before claiming ownership of either stream.
     status = await measurement_status(device)
-    if any(v["online"] or v["offline"] for v in status.values()):
-        raise AcquisitionError("ACC or gyro is already recording; cannot start this session")
+    if busy(status):
+        raise AcquisitionError("A sensor stream is already recording; cannot start this session")
     manifest["state"] = "starting"
     manifest["start_requests"] = []
     save()
     acknowledged = []
     try:
-        for stream, kind in KINDS.items():
-            config = choose_config(
-                {k: [v] for k, v in manifest["configurations"][stream].items()}, stream
-            )
-            request = bytearray(config.settings(PmdMeasurementType(kind)).to_bytes())
-            request[1] |= 0x80
+        for stream in session_streams(manifest):
+            kind = ALL_KINDS[stream]
+            if stream == "hr":
+                request = bytes([2, kind | 0x80])  # SDK: fixed HR settings, no settings query
+            else:
+                config = choose_config(
+                    {k: [v] for k, v in manifest["configurations"][stream].items()}, stream
+                )
+                request = bytearray(config.settings(PmdMeasurementType(kind)).to_bytes())
+                request[1] |= 0x80
             manifest["start_requests"].append(stream)
             save()  # retain ownership intent even if the ACK/connection is lost
             await device.command_raw(bytes(request))
             acknowledged.append(stream)
         confirmed = await measurement_status(device)
-        if not all(v["offline"] and not v["online"] for v in confirmed.values()):
-            raise AcquisitionError("Both IMUs did not confirm internal recording")
+        if not all(
+            confirmed.get(s, {}).get("offline") and (s == "hr" or not confirmed[s]["online"])
+            for s in session_streams(manifest)
+        ):
+            raise AcquisitionError("Requested streams did not confirm internal recording")
         manifest["state"] = "recording"
         manifest["recording_confirmed_utc"] = now()
         manifest["confirmed_status"] = confirmed
@@ -168,7 +201,7 @@ async def start_session(device, path: Path, manifest: dict):
         if not device.poisoned and device.client.is_connected:
             for stream in reversed(acknowledged):
                 try:
-                    await device.command_raw(bytes([3, KINDS[stream]]))
+                    await device.command_raw(bytes([3, ALL_KINDS[stream]]))
                     manifest.setdefault("stop_acknowledged", []).append(stream)
                 except Exception as exc:
                     manifest.setdefault("cleanup_errors", []).append(str(exc))
@@ -176,11 +209,11 @@ async def start_session(device, path: Path, manifest: dict):
         raise
 
 
-async def sync_session(device, ftp, path, manifest):
+async def sync_session(device, ftp, path, manifest, *, initial_status=None):
     def save():
         return write_json(path / MANIFEST, manifest)
 
-    await stop_owned(device, manifest, save)
+    await stop_owned(device, manifest, save, initial_status=initial_status)
     downloads = []
     entries = await ftp.list_recordings()
     selected = select_new_files(manifest, entries)
@@ -208,6 +241,7 @@ async def sync_session(device, ftp, path, manifest):
     manifest["output_sha256"] = {
         name: sha(path / name)
         for name in ("acc.csv", "gyro.csv", "hr.csv", "packets.jsonl", "metadata.json")
+        + (("mag.csv",) if "mag" in session_streams(manifest) else ())
     }
     save()
     return metadata
@@ -327,6 +361,9 @@ async def run_offline(
             "sensor_position": args.sensor_position,
             "arm": arm,
             "notes": args.notes,
+            "requested_streams": ["acc", "gyro"]
+            + ([] if args.no_hr else ["hr"])
+            + (["mag"] if getattr(args, "mag", False) else []),
             "state": "preparing",
             "errors": [],
         }
@@ -357,6 +394,36 @@ async def run_offline(
             raise AcquisitionError("Offline session belongs to a different sensor")
         device = device_factory(selected, lambda _: None, connect_timeout=args.connect_timeout)
         await device.connect()
+        initial_status = None
+        if action in ("stop", "sync"):
+            # Only retry this read-only preflight. Never replay start/stop commands,
+            # ownership failures or transfers on a desynchronized control channel.
+            for attempt in range(2):
+                try:
+                    initial_status = await measurement_status(device)
+                    break
+                except PmdTransportError as exc:
+                    if attempt:
+                        raise
+                    manifest.setdefault("recoveries", []).append(
+                        {
+                            "time_utc": now(),
+                            "phase": "initial_measurement_status",
+                            "error": str(exc),
+                            "action": "one_fresh_connection_retry",
+                        }
+                    )
+                    write_json(path / MANIFEST, manifest)
+                    print(
+                        "Initial status request lost its connection or timed out; "
+                        "reconnecting once...",
+                        flush=True,
+                    )
+                    await close_connection()
+                    device = device_factory(
+                        selected, lambda _: None, connect_timeout=args.connect_timeout
+                    )
+                    await device.connect()
         ftp = ftp_factory(device)
         if action != "stop":
             await ftp.connect()
@@ -365,19 +432,36 @@ async def run_offline(
             await start_session(device, path, manifest)
             print(
                 "Internal ACC + GYRO recording confirmed at 52 Hz.\n"
-                f"You can leave Bluetooth range. Keep the sensor on.\nSession: {path}"
+                + (
+                    "Internal HR recording confirmed.\n"
+                    if "hr" in session_streams(manifest)
+                    else ""
+                )
+                + f"You can leave Bluetooth range. Keep the sensor on.\nSession: {path}"
             )
+            if "mag" in session_streams(manifest):
+                print("Internal MAG recording confirmed at 20 Hz.")
         elif action == "stop":
-            await stop_owned(device, manifest, lambda: write_json(path / MANIFEST, manifest))
+            await stop_owned(
+                device,
+                manifest,
+                lambda: write_json(path / MANIFEST, manifest),
+                initial_status=initial_status,
+            )
             print(f"Internal recording stopped. Download with: offline sync {path}")
         elif action == "sync":
-            metadata = await sync_session(device, ftp, path, manifest)
+            metadata = await sync_session(
+                device, ftp, path, manifest, initial_status=initial_status
+            )
             print(
                 f"Saved {metadata['quality']['acc']['samples']} ACC and "
-                f"{metadata['quality']['gyro']['samples']} GYRO samples: {path}"
+                f"{metadata['quality']['gyro']['samples']} GYRO and "
+                f"{metadata['quality']['hr']['samples']} HR samples: {path}"
             )
             for warning in metadata["warnings"]:
                 print(f"WARNING: {warning}")
+            if "mag" in metadata["quality"]:
+                print(f"Saved {metadata['quality']['mag']['samples']} MAG samples (microtesla).")
         elif action == "status":
             result = {
                 "measurements": await measurement_status(device),
@@ -386,7 +470,7 @@ async def run_offline(
             print(json.dumps(result, indent=2))
         else:
             status = await measurement_status(device)
-            if any(v["online"] or v["offline"] for v in status.values()):
+            if busy(status):
                 raise AcquisitionError("Stop the active recording before listing its files")
             entries = await ftp.list_recordings()
             print(json.dumps(entries, indent=2))

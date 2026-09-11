@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from .offline import MANIFEST, now, select_new_files, sha, verified_download
+from .offline import MANIFEST, now, select_new_files, session_streams, sha, verified_download
 from .offline_data import export_recordings
 from .protocol import AcquisitionError
 from .storage import write_json
@@ -40,7 +40,7 @@ def select_files(source: dict, entries: list[dict], selected: dict) -> list[dict
         wanted = {e["path"] for e in expected}
         parents = {p.rsplit("/", 1)[0] for p in wanted}
         group = [e for e in entries if e["path"].rsplit("/", 1)[0] in parents]
-        files = select_new_files({"baseline_files": []}, group)
+        files = select_new_files({**source, "baseline_files": []}, group)
         if {e["path"] for e in files} != wanted:
             raise AcquisitionError("Sensor files changed or are missing; source session preserved")
         sizes = {e["path"]: e["size"] for e in expected}
@@ -61,8 +61,8 @@ def select_files(source: dict, entries: list[dict], selected: dict) -> list[dict
             ]
         except (ValueError, IndexError) as exc:
             raise AcquisitionError("Invalid sensor recording directory date") from exc
-        if len(starts) != 2 or (max(starts) - min(starts)).total_seconds() > 1:
-            raise AcquisitionError("ACC and GYRO do not belong to one sensor recording time")
+        if (max(starts) - min(starts)).total_seconds() > len(session_streams(source)) - 1:
+            raise AcquisitionError("Streams do not belong to one sensor recording time")
     # With an existing reference, every file must match its SHA-256 after transfer.
     # For first downloads the USB serial must identify the BLE session's sensor.
     referenced = all(known.get(e["path"], {}).get("sha256") for e in files)
@@ -119,6 +119,7 @@ def prepare_output(output: Path, source: dict, source_hash: str, session: Path) 
             for k in ("started_utc", "subject", "sensor_position", "arm", "notes", "device")
         },
         "download_transport": "usb_hid",
+        "requested_streams": session_streams(source),
         "state": "preparing",
         "downloads": [],
         "errors": [],
@@ -221,7 +222,10 @@ async def sync_usb(ftp, output: Path, manifest: dict, source: dict):
                 d["matches_ble_reference"] for d in manifest["downloads"]
             ),
         },
-        output_sha256={name: sha(output / name) for name in EXPORTS},
+        output_sha256={
+            name: sha(output / name)
+            for name in EXPORTS + (("mag.csv",) if "mag" in session_streams(source) else ())
+        },
     )
     save()
     print(

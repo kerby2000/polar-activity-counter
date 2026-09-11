@@ -115,7 +115,7 @@ class BaselineConfig:
     ambiguity_gyro_ratio: float = 1.10
 
 
-def stable_excursions(t, acc, gyro, start, end, config=None):
+def stable_excursions(t, acc, gyro, start, end, config=None, *, event_end=None):
     """Stable-context ablation, independent of the legacy pre-boundary baseline.
 
     Normalised vector mean is rotation-equivariant; componentwise vector medians
@@ -127,13 +127,16 @@ def stable_excursions(t, acc, gyro, start, end, config=None):
     width = max(3, round(0.44 * rate) // 2 * 2 + 1)
     smooth = _smooth(acc, width)
     direction = smooth / np.maximum(np.linalg.norm(smooth, axis=1)[:, None], 1)
-    region = np.flatnonzero((t >= start) & (t <= end + 2))
+    scan_end = end + 2 if event_end is None else max(end + 2, event_end)
+    event_region = np.flatnonzero((t >= start) & (t <= scan_end))
     magnitude, speed = np.linalg.norm(acc, axis=1), np.linalg.norm(gyro, axis=1)
     shock = (magnitude < 450) | ((magnitude > 1800) & (speed > 250))
-    found = region[shock[region]]
+    found = event_region[shock[event_region]]
     cutoff = float(t[found[0]] - (width // 2 + 1) / rate) if len(found) else None
     if cutoff is not None:
-        region = region[t[region] < cutoff]
+        event_region = event_region[t[event_region] < cutoff]
+    # Extra event context must not select a new resting pose after the set.
+    region = event_region[t[event_region] <= end + 2]
     candidates = []
     size = max(3, round(config.window_s * rate))
     for first in region:
@@ -191,6 +194,7 @@ def stable_excursions(t, acc, gyro, start, end, config=None):
     if ambiguous:
         result["rejection_reasons"] = ["ambiguous_stable_poses"]
         return result
+    region = event_region
     depth = 1 - direction @ baseline
     angle = np.degrees(np.arccos(np.clip(direction @ baseline, -1, 1)))
 

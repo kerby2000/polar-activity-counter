@@ -162,6 +162,17 @@ counts during sitting. The [full results](adaptive_analysis.md) retain those err
 
 ## Why this method, and what about machine learning?
 
+### Heart rate and elevation
+
+HR is recorded and plotted as auxiliary context; it does not enter the reference
+classifier or counters. It may help assess sustained effort, but its response
+lags activity and remains elevated during recovery. Quaternions describe
+orientation; a magnetometer measures magnetic field. Neither directly measures
+height. See [HR timing, stair direction and sensor limitations](heart_rate_and_elevation.md)
+for the acquisition details and the evidence needed before using HR for direction.
+
+### Model choice
+
 This is a small supervised reference classifier plus signal-processing counters.
 It is interpretable and inexpensive to run, and fits the small amount of personal
 reference data available. The project does not yet have evidence for a universal

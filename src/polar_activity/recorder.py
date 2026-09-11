@@ -11,6 +11,7 @@ from .connection_log import ConnectionLog
 from .device import Packet, SenseDevice, find_device
 from .keyboard import HELP, Keyboard, LabelController
 from .labels import Labels
+from .magnetometer import decode_mag
 from .protocol import AcquisitionError, TimestampReconstructor, choose_config, decode_hr, decode_imu
 from .storage import SessionStore
 
@@ -43,13 +44,14 @@ async def record_session(
     device_factory=SenseDevice,
     selected_device=None,
     connect_timeout: float = 30,
+    mag: bool = False,
 ) -> tuple[Path, dict]:
     from .diagnostics import diagnose
 
     selected = selected_device or await find_device(selector, scan_timeout)
     buffer = PacketBuffer()
     device = device_factory(selected, buffer.put, connect_timeout=connect_timeout)
-    store = SessionStore(output, subject, sensor_position, arm, notes)
+    store = SessionStore(output, subject, sensor_position, arm, notes, mag=mag)
     labels = Labels(output, store.elapsed)
     recon: dict[str, TimestampReconstructor] = {}
     configs = {}
@@ -57,8 +59,10 @@ async def record_session(
     error: Exception | None = None
     parse_errors: list[str] = []
     cancelled = False
-    sample_counts = {"acc": 0, "gyro": 0}
-    packet_counts = {"acc": 0, "gyro": 0}
+    streams = ["acc", "gyro"] + (["mag"] if mag else [])
+    sample_counts = dict.fromkeys(streams, 0)
+    packet_counts = dict.fromkeys(streams, 0)
+    pending_mag = []
     stop_reason = "setup_error"
     last_loop_ns = None
     max_loop_interval_ms = 0.0
@@ -67,11 +71,23 @@ async def record_session(
     def process(packet: Packet) -> None:
         packet_id = store.packet(packet)  # Preserve bytes before attempting any interpretation.
         if packet.stream in configs:
-            last, samples = decode_imu(
-                packet.payload, configs[packet.stream], device.factors[packet.stream]
-            )
+            if packet.stream == "mag":
+                last, samples, statuses = decode_mag(
+                    packet.payload, configs["mag"], device.factors["mag"]
+                )
+            else:
+                last, samples = decode_imu(
+                    packet.payload, configs[packet.stream], device.factors[packet.stream]
+                )
             stamps, method = recon[packet.stream].reconstruct(last, len(samples))
-            store.imu(packet, packet_id, last, stamps, samples, method)
+            if packet.stream == "mag":
+                pending_mag.append((packet, packet_id, last, stamps, samples, statuses, method))
+            else:
+                store.imu(packet, packet_id, last, stamps, samples, method)
+            if store.anchor is not None:
+                for values in pending_mag:
+                    store.magnetometer(*values)
+                pending_mag.clear()
             sample_counts[packet.stream] += len(samples)
             packet_counts[packet.stream] += 1
             last_arrival[packet.stream] = packet.host_monotonic_ns
@@ -91,13 +107,15 @@ async def record_session(
         report = await device.inspect()
         store.metadata["device"] = report
         store.metadata["warnings"].extend(report["warnings"])
-        for stream in ("acc", "gyro"):
+        for stream in streams:
             if not report["available_streams"].get(stream):
                 raise AcquisitionError(f"{stream.upper()} unavailable on this device")
             configs[stream] = choose_config(report["settings"].get(stream, {}), stream)
             recon[stream] = TimestampReconstructor(configs[stream].sample_rate)
+        for stream in streams:
             await device.start(stream, configs[stream])
             store.metadata["configurations"][stream] = asdict(configs[stream])
+        store.metadata["mag_enabled"] = mag
         if hr and report["available_streams"].get("hr"):
             try:
                 await device.start_hr()
@@ -115,7 +133,12 @@ async def record_session(
         store.metadata["streaming_started_time_s"] = store.elapsed(setup_finished)
         store.metadata["requested_duration_s"] = duration
         store.save_metadata()
-        print("Checking two valid packets from each of ACC and GYRO...", flush=True)
+        print(
+            "Checking two valid packets from each of "
+            + ", ".join(s.upper() for s in streams)
+            + "...",
+            flush=True,
+        )
         while not all(count >= 2 for count in packet_counts.values()):
             if buffer.dropped or device.disconnected.is_set():
                 raise AcquisitionError(
@@ -141,6 +164,10 @@ async def record_session(
             f"({sample_counts['acc']} / {sample_counts['gyro']} samples saved).",
             flush=True,
         )
+        if mag:
+            print(
+                f"MAG ready at configured 20 Hz ({sample_counts['mag']} samples saved).", flush=True
+            )
         last_flush = time.monotonic()
         last_progress = last_flush
         with Keyboard(interactive) as keyboard:
@@ -239,6 +266,8 @@ async def record_session(
             scale_factor_sources=device.factor_sources.copy(),
             connection_events=device.connection_events,
         )
+        if pending_mag:
+            parse_errors.append("MAG packets retained, but no IMU clock anchor was received")
         if parse_errors or buffer.dropped:
             store.metadata["status"] = "failed"
             error = error or AcquisitionError(
@@ -248,7 +277,7 @@ async def record_session(
         store.close()
         quality = diagnose(output, metadata=store.metadata)
         store.metadata["quality"] = quality
-        if any(quality[s]["samples"] == 0 for s in ("acc", "gyro")):
+        if not cancelled and any(quality[s]["samples"] == 0 for s in ("acc", "gyro")):
             store.metadata["status"] = "failed"
             error = error or AcquisitionError("One or both IMU streams contain no samples")
         store.save_metadata()

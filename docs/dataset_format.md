@@ -40,6 +40,15 @@ Only ACC axis columns occur in acc.csv and gyro columns in gyro.csv. Large times
 
 ## HR and packet bytes
 
+Optional `mag.csv` stores the same timestamp/packet fields as the IMUs plus
+`mag_x_ut`, `mag_y_ut`, `mag_z_ut` in microtesla, `calibration_status_raw` and
+`calibration_status`. It uses the ACC/GYRO origin and its own nominal 20 Hz sampling
+rate. Unknown calibration codes are preserved; absent status is `not_reported`.
+`mag_enabled`, `configurations.mag`, factors and quality statistics describe the
+capture. BLE/USB export hashes include `mag.csv` when requested. MAG is read only
+for presentation/inspection, with a separate hash in derived analysis; it never
+enters the current classifier or shifts its timestamps. See [MAG format](magnetometer.md).
+
 hr.csv contains `time_s` (host elapsed), `host_monotonic_ns`, `host_time_utc`, `packet_id`, `hr_bpm`, `contact_supported`, `contact_detected`, `energy_expended`, and a JSON-array `rr_intervals_ms` field. Absent values are empty. There is no fabricated HR device timestamp. HR contact status on Verity Sense is not a trustworthy wear detector.
 
 Each packets.jsonl line contains `packet_id`, `stream`, `payload_hex`, `host_monotonic_ns` and `host_time_utc`. Preserve metadata's `control_exchanges` and `scale_factors` with these bytes. Notification order is arrival order and can interleave streams; it is not a globally sample-sorted table.
@@ -86,7 +95,16 @@ stream by stream, not by Bluetooth arrival order. Header dates are recorded as r
 without assuming clock accuracy. Metadata's start UTC refers to the PC start command;
 download UTC and sensor header dates are separate fields.
 
-Offline HR is currently disabled, with an empty standard `hr.csv`. `labels.csv`
+New offline sessions include HR by default; older and `--no-hr` sessions retain an
+empty standard `hr.csv`. Offline HR adds `ppg_quality`, `corrected_hr_bpm` (only
+when the firmware supplies raw frame type 1), `sample_index`,
+`packet_timestamp_ns` (possibly zero) and `timestamp_method`. Raw values are
+preserved; unknown contact/RR fields and host arrival times remain empty. HR
+`time_s` uses the header plus a nominal one-second sample interval, on the existing
+IMU origin. It is an estimate, not a measured beat timestamp. Metadata's `hr_timing`
+and the plots state this limitation. See [HR details](heart_rate_and_elevation.md).
+
+`labels.csv`
 starts empty, with later manual annotations preserved. There is no keyboard-event
 journal for an unattended recording. The same `diagnose`, `plot` and `count` commands
 work on exported data. `status: complete` refers to downloaded file integrity and

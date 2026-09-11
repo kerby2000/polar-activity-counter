@@ -11,6 +11,8 @@ from .adaptive_pullups import pullup_bouts
 from .analyser import _jump_sets, plot_analysis, plot_motion_quality
 from .counting import _write_csv, load_motion
 from .experiments.signal import feature_vector
+from .heart_rate import read_heart_rate
+from .magnetometer import read_magnetometer
 from .motion_quality import compare_excursions
 from .recognition import CLASSES, activity_intervals, motion_blocks, source_hashes
 from .storage import write_json
@@ -276,6 +278,7 @@ def analyse_arrays(data, model):
         item["set_id"] = f"{i:03d}"
     return {
         "algorithm": VERSION,
+        "counter_revision": "bounded-pullup-continuation-v1",
         "sets": accepted,
         "windows": windows,
         "activities": activity_intervals(windows),
@@ -317,6 +320,8 @@ def analyse_session(session, model_path, output=None, plot=True):
         }
     )
     output.mkdir(parents=True, exist_ok=True)
+    hr_rows, result["heart_rate"] = read_heart_rate(session)
+    mag_rows, result["magnetometer"] = read_magnetometer(session)
     write_json(output / "analysis.json", result)
     _write_csv(
         output / "sets.csv",
@@ -353,7 +358,7 @@ def analyse_session(session, model_path, output=None, plot=True):
         result["unassigned_attempts"],
     )
     if plot:
-        plot_analysis(data, result, output / "analysis.png")
+        plot_analysis(data, result, output / "analysis.png", hr_rows=hr_rows, mag_rows=mag_rows)
         if any(s.get("motion_quality") for s in result["sets"]):
             plot_motion_quality(result["sets"], output / "motion_quality.png")
     return result
