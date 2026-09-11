@@ -1,0 +1,62 @@
+{
+  "renderer": "scripts/build_documentation_figures.py",
+  "sessions": {
+    "blind-01": {
+      "evaluation": "retrospective_development_replay",
+      "analysis_sha256": "ab6adff20a3b86d950c5d4fa715e27cca9eeba6701206fff31369060c0119cfe",
+      "source_sha256": {
+        "acc.csv": "bfd0c3753102689f00822e7a95257f779cf9163dcaf40d84241d47480c920a2c",
+        "gyro.csv": "bb580e59f11aea4737a136231d3be1812bd50effd9d405631fa7552b6b12d2f7"
+      },
+      "model_sha256": "451fc3805b16c642803583428cd2c06580d95b6df71d612a78105a64b409831b",
+      "sets": [
+        {
+          "activity": "push-up",
+          "rep_estimate": 5,
+          "start_time_s": 21.123070301000002,
+          "end_time_s": 28.003070301
+        },
+        {
+          "activity": "pull-up",
+          "rep_estimate": 3,
+          "start_time_s": 66.003070301,
+          "end_time_s": 75.24307030099999
+        }
+      ]
+    },
+    "blind-02": {
+      "evaluation": "fresh_blind",
+      "analysis_sha256": "bf80fd1a95935bfd6c85bd42044f015e3b3b68a441752ee91c5130c673a470b5",
+      "source_sha256": {
+        "acc.csv": "c7ad8d853b1191c01dfe0ce79155dd49aee86f59c2083a1f27f9e941394899f9",
+        "gyro.csv": "d358241a4a87faecea61b5cd4d9d1fd23b8b9ae6c6e0b220b23746753c2fd54d"
+      },
+      "model_sha256": "451fc3805b16c642803583428cd2c06580d95b6df71d612a78105a64b409831b",
+      "sets": [
+        {
+          "activity": "jump",
+          "rep_estimate": 3,
+          "start_time_s": 12.41976688,
+          "end_time_s": 16.934450141
+        },
+        {
+          "activity": "squat",
+          "rep_estimate": 10,
+          "start_time_s": 36.48135288,
+          "end_time_s": 61.00135288
+        },
+        {
+          "activity": "push-up",
+          "rep_estimate": 11,
+          "start_time_s": 97.88135288,
+          "end_time_s": 114.36135288
+        }
+      ]
+    }
+  },
+  "image_sha256": {
+    "blind-01-overview.png": "68b1b7020b3c8cb6810db5ca60dabe4b7e5e9cb624a31a9a16cad0a822af8297",
+    "blind-02-cycles.png": "447a1be18f6b7fdffa659cd6ff5818941301c51ebb3f0161afaf23c092343aa2",
+    "blind-02-overview.png": "ef12d069e62aab6c05c8b471ea7013ef54d4cc2f8540c85e8c04a2ba6ce55a1c"
+  }
+}

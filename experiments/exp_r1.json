@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "dataset_manifest": "../data/processed/exp-r1/dataset.json",
+  "annotations": "../data/processed/exp-r1/annotations.json",
+  "frozen_model": "../data/models/personal-evaluation-20260910.json",
+  "output_root": "../data/processed/exp-r1/runs",
+  "representations": ["raw_axes_v1", "joint_pca_v1"],
+  "match": {
+    "stride_s": 0.25,
+    "points": 64,
+    "band_radius": 8,
+    "speed_factors": [0.75, 1.0, 1.25],
+    "duration_ratio": [0.6, 1.6],
+    "amplitude_ratio": [0.35, 2.8],
+    "min_relative_margin": 0.08,
+    "max_pause_s": 3.0,
+    "max_candidates": 30000,
+    "default_threshold": 1.0
+  },
+  "minimum_iou": 0.2,
+  "rotation_axis": [1.0, 2.0, 3.0],
+  "rotation_degrees": 73.0,
+  "folds": "leave_one_recording_out_and_exposed_regression",
+  "notes": "Fixed initial descriptive experiment; no heldout threshold search. No production promotion."
+}

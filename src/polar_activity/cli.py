@@ -27,7 +27,9 @@ def positive(value: str) -> float:
 
 
 def parser() -> argparse.ArgumentParser:
-    root = argparse.ArgumentParser(description="Verity Sense VS-0 acquisition (no classifier)")
+    root = argparse.ArgumentParser(
+        description="Verity Sense recording and personal activity analysis"
+    )
     root.add_argument("--version", action="version", version=__version__)
     root.add_argument("--verbose", action="store_true")
     commands = root.add_subparsers(dest="command", required=True)
@@ -35,6 +37,13 @@ def parser() -> argparse.ArgumentParser:
         sub = commands.add_parser(command)
         sub.add_argument("--device", help="Exact Polar ID, advertised name or BLE identifier")
         sub.add_argument("--scan-timeout", type=positive, default=8)
+        if command != "scan":
+            sub.add_argument(
+                "--connect-timeout",
+                type=positive,
+                default=30,
+                help="Seconds allowed for connection and service discovery (default: 30)",
+            )
         if command != "record":
             sub.add_argument("--json", action="store_true")
         if command == "verify":
@@ -60,6 +69,83 @@ def parser() -> argparse.ArgumentParser:
     selection.add_argument("--activity")
     sub.add_argument("--start", type=float)
     sub.add_argument("--end", type=float)
+    sub = commands.add_parser(
+        "count", help="Automatically find repeated-motion sets and full cycles"
+    )
+    sub.add_argument("session", type=Path)
+    sub.add_argument(
+        "--output", type=Path, help="Derived output folder; default SESSION/automatic-count"
+    )
+    sub.add_argument("--json", action="store_true")
+    sub.add_argument("--no-plot", action="store_true")
+    sub = commands.add_parser(
+        "train", help="Build a personal model from explicit reference intervals"
+    )
+    sub.add_argument("references", type=Path, help="JSON manifest of labelled reference intervals")
+    sub.add_argument("--output", type=Path, help="Default: data/models/personal[-adaptive].json")
+    sub.add_argument("--engine", choices=("legacy", "adaptive"), default="legacy")
+    sub = commands.add_parser(
+        "analyze", help="Recognize activities and estimate repetitions with a personal model"
+    )
+    sub.add_argument("session", type=Path)
+    sub.add_argument("--model", type=Path, help="Default: data/models/personal[-adaptive].json")
+    sub.add_argument("--engine", choices=("legacy", "adaptive"), default="legacy")
+    sub.add_argument("--output", type=Path)
+    sub.add_argument("--json", action="store_true")
+    sub.add_argument("--no-plot", action="store_true")
+    experiment = commands.add_parser("experiment", help="Run the opt-in offline EXP-R1 comparisons")
+    actions = experiment.add_subparsers(dest="experiment_command", required=True)
+    for action in ("inventory", "run"):
+        sub = actions.add_parser(action)
+        sub.add_argument("--config", type=Path, default=Path("experiments/exp_r1.json"))
+        if action == "run":
+            sub.add_argument(
+                "--group", action="append", help="Run/resume only these manifest groups"
+            )
+    sub = actions.add_parser("report")
+    sub.add_argument("--run", type=Path, required=True)
+    sub = actions.add_parser("recofit")
+    sub.add_argument("--output", type=Path, default=Path("data/processed/exp-r1/recofit"))
+    sub.add_argument("--subjects", type=int, choices=range(1, 5), default=2)
+    offline = commands.add_parser("offline", help="Record into sensor memory and download later")
+    actions = offline.add_subparsers(dest="offline_command", required=True)
+    for action in ("start", "status", "stop", "list", "sync"):
+        sub = actions.add_parser(action)
+        sub.add_argument("--scan-timeout", type=positive, default=8)
+        sub.add_argument("--connect-timeout", type=positive, default=30)
+        if action in ("stop", "sync"):
+            sub.add_argument("session", type=Path, help="Session folder created by offline start")
+        else:
+            sub.add_argument("--device")
+        if action == "start":
+            sub.add_argument("--subject", required=True)
+            sub.add_argument("--sensor-position", required=True)
+            sub.add_argument("--notes", default="")
+            sub.add_argument("--output", required=True, type=Path, help="New session directory")
+    usb = commands.add_parser(
+        "usb", help="Download sensor-memory recordings through the USB adapter"
+    )
+    actions = usb.add_subparsers(dest="usb_command", required=True)
+    actions.add_parser("scan", help="List Polar USB HID interfaces")
+    for action in ("list", "sync"):
+        sub = actions.add_parser(action)
+        sub.add_argument("--device", help="Exact USB serial, product name or path from usb scan")
+        sub.add_argument(
+            "--timeout", type=positive, default=10, help="USB idle reply timeout in seconds"
+        )
+        if action == "sync":
+            sub.add_argument(
+                "session", type=Path, help="Stopped or downloaded offline session folder"
+            )
+            sub.add_argument(
+                "--output",
+                required=True,
+                type=Path,
+                help="Separate USB copy folder; retry resumes verified files",
+            )
+        else:
+            sub.add_argument("--output", type=Path, help="Save USB inventory/diagnostics as JSON")
+            sub.add_argument("--disk", action="store_true", help="Also query sensor disk space")
     return root
 
 
@@ -100,10 +186,11 @@ async def ble_command(args: argparse.Namespace) -> None:
             not args.no_hr,
             not args.no_interactive,
             args.notes,
+            connect_timeout=args.connect_timeout,
         )
         return
     selected = await find_device(args.device, args.scan_timeout)
-    device = SenseDevice(selected, lambda _: None)
+    device = SenseDevice(selected, lambda _: None, connect_timeout=args.connect_timeout)
     try:
         await device.connect()
         report = await device.inspect()
@@ -136,11 +223,74 @@ def main(argv: list[str] | None = None) -> int:
         format="%(levelname)s %(name)s: %(message)s",
     )
     try:
-        if args.command in ("scan", "verify", "record"):
+        if args.command == "experiment":
+            try:
+                from .experiments.runner import inventory, load_config, run, score_run
+            except ImportError as exc:
+                raise ValueError(
+                    'Install experiment dependencies: python -m pip install -e ".[experiment]"'
+                ) from exc
+            if args.experiment_command == "inventory":
+                print(json.dumps(inventory(load_config(args.config)), indent=2))
+            elif args.experiment_command == "run":
+                run(args.config, args.group)
+            elif args.experiment_command == "recofit":
+                from .experiments.recofit import run_external
+
+                print(run_external(args.output, args.subjects))
+            else:
+                from .experiments.reporting import report
+
+                score_run(args.run)
+                print(report(args.run))
+        elif args.command == "usb":
+            from .usb_sync import run_usb
+
+            asyncio.run(run_usb(args))
+        elif args.command == "offline":
+            from .offline import run_offline
+
+            asyncio.run(run_offline(args))
+        elif args.command in ("scan", "verify", "record"):
             asyncio.run(ble_command(args))
         elif args.command == "diagnose":
             result = diagnose(args.session)
             print(json.dumps(result, indent=2) if args.json else format_report(result))
+        elif args.command == "train":
+            if args.engine == "adaptive":
+                from .adaptive import fit_model
+            else:
+                from .recognition import fit_model
+
+            args.output = args.output or Path(
+                "data/models/personal-adaptive.json"
+                if args.engine == "adaptive"
+                else "data/models/personal.json"
+            )
+            result = fit_model(args.references, args.output)
+            print(f"Saved personal model: {args.output}")
+            print(
+                f"Classes: {', '.join(result['classes'])}; "
+                f"{len(result['examples'])} reference windows"
+            )
+        elif args.command == "analyze":
+            if args.engine == "adaptive":
+                from .adaptive import analyse_session, format_analysis
+            else:
+                from .analyser import analyse_session, format_analysis
+
+            args.model = args.model or Path(
+                "data/models/personal-adaptive.json"
+                if args.engine == "adaptive"
+                else "data/models/personal.json"
+            )
+            result = analyse_session(args.session, args.model, args.output, not args.no_plot)
+            print(json.dumps(result, indent=2) if args.json else format_analysis(result))
+        elif args.command == "count":
+            from .counting import count_session, format_counts
+
+            result = count_session(args.session, args.output, not args.no_plot)
+            print(json.dumps(result, indent=2) if args.json else format_counts(result))
         else:
             from .plotting import plot_session
 
@@ -156,6 +306,11 @@ def main(argv: list[str] | None = None) -> int:
         return 130
     except (AcquisitionError, BleakError, OSError, ValueError, TimeoutError) as exc:
         logging.debug("Command failed", exc_info=True)
-        print(f"Error: {exc}", file=sys.stderr)
+        detail = str(exc) or (
+            "Operation timed out. Run with --verbose for the failing step."
+            if isinstance(exc, TimeoutError)
+            else type(exc).__name__
+        )
+        print(f"Error: {detail}", file=sys.stderr)
         return 1
     return 0

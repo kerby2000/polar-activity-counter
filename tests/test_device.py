@@ -3,7 +3,7 @@ import asyncio
 import pytest
 from conftest import FakeClient
 
-from polar_activity.device import CP, SenseDevice, find_device
+from polar_activity.device import CP, DATA, SenseDevice, find_device
 from polar_activity.protocol import AcquisitionError, StreamConfig
 
 
@@ -104,3 +104,88 @@ def test_multiple_devices_requires_selector(monkeypatch, ble_device):
     monkeypatch.setattr("polar_activity.device.discover", many)
     with pytest.raises(AcquisitionError, match="Multiple"):
         asyncio.run(find_device(None, 1))
+
+
+def test_windows_connection_refreshes_services_without_pairing(ble_device):
+    class CachedHandlesClient(FakeClient):
+        async def start_notify(self, uuid, callback):
+            if self.options["winrt"].get("use_cached_services") is not False:
+                raise OSError("Cached CCCD handle is stale")
+            await super().start_notify(uuid, callback)
+
+    async def run():
+        device = SenseDevice(
+            ble_device, lambda _: None, client_factory=CachedHandlesClient, connect_timeout=60
+        )
+        await device.connect()
+        assert not device.client.options["pair"]
+        assert device.client.options["timeout"] == 60
+        assert CP in device.client.callbacks and DATA in device.client.callbacks
+        await device.close()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    ("stage", "description"),
+    [("connect", "service discovery"), (CP, "control indications"), (DATA, "data notifications")],
+)
+def test_setup_timeouts_identify_stage_and_disconnect(ble_device, stage, description):
+    class TimeoutClient(FakeClient):
+        async def connect(self):
+            await super().connect()
+            if stage == "connect":
+                await asyncio.sleep(1)
+
+        async def start_notify(self, uuid, callback):
+            if stage == uuid:
+                await asyncio.sleep(1)
+            await super().start_notify(uuid, callback)
+
+    async def run():
+        device = SenseDevice(
+            ble_device,
+            lambda _: None,
+            timeout=0.01,
+            connect_timeout=0.01,
+            client_factory=TimeoutClient,
+        )
+        with pytest.raises(AcquisitionError, match=description + " failed: timed out"):
+            await device.connect()
+        assert not device.client.is_connected
+
+    asyncio.run(run())
+
+
+def test_windows_notification_cancellation_is_actionable(ble_device):
+    class CancelClient(FakeClient):
+        async def start_notify(self, uuid, callback):
+            error = OSError("The operation was canceled by the user")
+            error.winerror = -2147023673
+            raise error
+
+    async def run():
+        device = SenseDevice(ble_device, lambda _: None, client_factory=CancelClient)
+        with pytest.raises(AcquisitionError, match="Windows canceled the GATT request") as error:
+            await device.connect()
+        assert "PMD control indications" in str(error.value)
+        assert not device.client.is_connected
+
+    asyncio.run(run())
+
+
+def test_feature_read_timeout_is_actionable(ble_device):
+    class TimeoutClient(FakeClient):
+        async def read_gatt_char(self, uuid):
+            raise TimeoutError()
+
+    async def run():
+        device = SenseDevice(ble_device, lambda _: None, client_factory=TimeoutClient)
+        await device.connect()
+        try:
+            with pytest.raises(AcquisitionError, match="Reading PMD features timed out"):
+                await device.inspect()
+        finally:
+            await device.close()
+
+    asyncio.run(run())

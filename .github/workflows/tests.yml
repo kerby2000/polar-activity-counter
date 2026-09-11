@@ -1,4 +1,4 @@
-name: VS-0 checks
+name: Checks
 on: [push, pull_request]
 jobs:
   test:
@@ -12,8 +12,14 @@ jobs:
       - uses: actions/setup-python@v7.0.0
         with:
           python-version: ${{ matrix.python }}
-      - run: python -m pip install -e ".[dev]"
+      - run: python -m pip install -e ".[dev,experiment]"
       - run: python -m ruff check .
       - run: python -m ruff format --check .
       - run: python -m pytest -q
       - run: python -m pip check
+      - name: Try the documented hardware-free workflow
+        run: |
+          python scripts/make_synthetic_session.py data/raw/synthetic-demo
+          python -m polar_activity diagnose data/raw/synthetic-demo
+          python -m polar_activity plot data/raw/synthetic-demo
+          python -m polar_activity count data/raw/synthetic-demo

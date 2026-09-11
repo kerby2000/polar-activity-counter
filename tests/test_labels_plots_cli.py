@@ -72,3 +72,31 @@ def test_cli_errors_before_bluetooth(recorded, capsys):
     assert main(["diagnose", str(recorded), "--json"]) == 0
     with pytest.raises(SystemExit):
         main(["record", "--subject", "s", "--sensor-position", "arm", "--duration", "nan"])
+
+
+def test_cli_does_not_print_empty_timeout_error(monkeypatch, capsys):
+    async def timeout(_args):
+        raise TimeoutError()
+
+    monkeypatch.setattr("polar_activity.cli.ble_command", timeout)
+    assert main(["verify"]) == 1
+    assert "Operation timed out" in capsys.readouterr().err
+
+
+def test_cli_passes_connection_timeout(monkeypatch, ble_device):
+    from polar_activity.cli import ble_command, parser
+    from polar_activity.protocol import AcquisitionError
+
+    async def find(*_args):
+        return ble_device
+
+    def capture(*_args, connect_timeout):
+        assert connect_timeout == 60
+        raise AcquisitionError("timeout captured")
+
+    monkeypatch.setattr("polar_activity.cli.find_device", find)
+    monkeypatch.setattr("polar_activity.cli.SenseDevice", capture)
+    import asyncio
+
+    with pytest.raises(AcquisitionError, match="timeout captured"):
+        asyncio.run(ble_command(parser().parse_args(["verify", "--connect-timeout", "60"])))

@@ -1,0 +1,7 @@
+{
+  "dataset_manifest": "../data/processed/exp-r1/dataset.json",
+  "annotations": "../data/processed/exp-r1/annotations.json",
+  "prior_run": "../data/processed/exp-r1/runs/75cc9cfd21036b86",
+  "output_root": "../data/processed/exp-r2/runs",
+  "notes": "Fixed first combination: gravity-relative features, stable pull-up baseline and multiscale return cycles. Counts enter scoring only. All recordings are development/exposed."
+}
